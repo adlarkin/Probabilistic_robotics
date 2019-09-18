@@ -6,6 +6,7 @@ import control
 from numpy import matmul as mm # matrix multiply
 from numpy.linalg import inv as mat_inv # matrix inverse
 import matplotlib.pyplot as plt
+from scipy.io import loadmat
 
 class Model():
     def __init__(self, A, B, C, D, R, Q, mu, sigma, control_inputs, seed=None):
@@ -18,7 +19,7 @@ class Model():
         @type Q: numpy.ndarray
         @type mu: numpy.ndarray
         @type sigma: numpy.ndarray
-        @type control_inputs: list
+        @type control_inputs: numpy.ndarray
         """
         np.random.seed(seed)    # for debugging (removes randomness from noise)
 
@@ -38,26 +39,55 @@ class Model():
 
         self.control_inputs = control_inputs
 
-        # noisy inputs and noisy measurements
-        self.true_measurements, self.noisy_measurements = self.get_measurements()
+        # ground truth = states (v,x), measrements = output
+        self.vtr, self.xtr, self.measurements = self.get_data()
 
-    def get_measurements(self):
-        true_measurements = []
-        noisy_measurements = []
+        # for testing/debugging
+        # self.load_matlab_data()
+
+    def load_matlab_data(self):
+        # loading matlab data (for comparison)
+        x = loadmat('hw1_soln_data.mat')
+        mu0 = x['mu0']
+        Q = x['Q']
+        R = x['R']
+        Sig0 = x['Sig0']
+        t = x['t']
+        u = x['u']
+        vtr = x['vtr']
+        xtr = x['xtr']
+        z = x['z']
+
+        # try on the matlab data (for comparison)
+        self.mu = mu0
+        self.sigma = Sig0
+        self.control_inputs = u
+        self.vtr = vtr
+        self.xtr = xtr
+        self.measurements = z
+
+    def get_data(self):
+        vtr = np.zeros((1,self.control_inputs.size))
+        xtr = np.zeros((1,self.control_inputs.size))
+        measurements = np.zeros((1,self.control_inputs.size))
+
         curr_state = np.array(self.mu)
-        for c_input in self.control_inputs:
+        for i in range(self.control_inputs.size):
+            c_input = self.control_inputs[0 , i]
+            c_input = np.reshape(c_input, (1,1))
             # get the next state from the control input
             next_state = mm(self.A, curr_state) + \
                             mm(self.B, c_input) + \
                             self.make_process_noise()
-            # save the ground truth measurement (no noise)
-            measurement = mm(self.C, next_state)
-            true_measurements.append(measurement)
-            # save the noisy measurement
-            noisy_measurements.append(measurement + self.make_measurement_noise())
+            # save the ground truth state (v and x)
+            vtr[0 , i] = next_state[0 , 0]
+            xtr[0 , i] = next_state[1 , 0]
+            # save the measurement
+            measurements[0 , i] = \
+                (mm(self.C, next_state) + self.make_measurement_noise())
 
             curr_state = next_state
-        return true_measurements, noisy_measurements
+        return vtr, xtr, measurements
 
     def make_process_noise(self):
         # assume distribution is zero-centered
@@ -72,11 +102,13 @@ class Model():
         return noisy_transition
 
     def kalman_filter(self):
-        # kalman_gains = []
+        sigma_1 = []
+        sigma_2 = []
 
-        for timestep in range(len(self.control_inputs)):
-            c_input = self.control_inputs[timestep]
-            z = self.noisy_measurements[timestep]
+        for timestep in range(self.control_inputs.size):
+            c_input = self.control_inputs[0 , timestep]
+            c_input = np.reshape(c_input, (1,1))
+            z = self.measurements[0 , timestep]
 
             # prediction
             mu_bar = mm(self.A, self.mu) + mm(self.B, c_input)
@@ -94,14 +126,23 @@ class Model():
             self.mu = mu
             self.sigma = sigma
 
-        #     kalman_gains.append(k)
-        # return kalman_gains
+            sigma_1.append(np.sqrt(sigma[0 , 0]) * 2 * -1)
+            sigma_2.append(np.sqrt(sigma[0 , 0]) * 2)
+
+            # print(mu_bar.shape)
+            # print(sigma_bar.shape)
+            # print(k.shape)
+            # print(mu.shape)
+            # print(sigma.shape)
+        return sigma_1, sigma_2
 
 
 
-# define continuous state space model
+# robot model parameters
 b = 20      # drag coefficient
 m = 100     # mass
+
+# define continuous state space model
 A = np.array([[(-b/m) , 0] , [1 , 0]])
 B = np.array([[(1/m)] , [0]])
 C = np.array([0, 1])
@@ -120,27 +161,24 @@ sys_d.D = np.array(sys_d.D)
 R = np.array([[.01 , 0] , [0 , .0001]])
 Q = np.array([[.001]])
 
-# set the initial belief
+# set the initial belief (initial condition)
 mu = np.array([[0] , [0]])
 sigma = np.array([[.01 , 0] , [0 , .0001]])
 
 # set the ground truth control inputs
-control_inputs = []
-t = 0
-while (t < 5):
-    control_inputs.append(np.array([[50]]))
-    t += dt
-while (t < 25):
-    control_inputs.append(np.array([[0]]))
-    t += dt
-while (t < 30):
-    control_inputs.append(np.array([[-50]]))
-    t += dt
-while (t < 50):
-    control_inputs.append(np.array([[50]]))
-    t += dt
+times = np.arange(0, 50+dt, dt)
+control_inputs = np.zeros((1, times.size))
+control_inputs[0 , 0:100] = 50
+control_inputs[0 , 100:500] = 0
+control_inputs[0 , 500:600] = -50
+control_inputs[0 , 600:] = 0
 
 # make the robot model
 uuv = Model(sys_d.A, sys_d.B, sys_d.C, sys_d.D, R, Q, mu, sigma, control_inputs, None)
 
 uuv.kalman_filter()
+
+s1, s2 = uuv.kalman_filter()
+
+plt.plot(times, s1, times, s2)
+plt.show()

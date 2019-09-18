@@ -8,9 +8,57 @@ from numpy.linalg import inv as mat_inv # matrix inverse
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
 
-class Model():
-    def __init__(self, A, B, C, D, R, Q, mu, sigma, control_inputs, seed=None):
+class Plotter():
+    def __init__(self, times):
         """
+        @type times: numpy.ndarray
+        """
+        self.times = times
+
+        self.v_sigma_pos = []
+        self.v_sigma_neg = []
+        self.v_error = []
+
+        self.x_sigma_pos = []
+        self.x_sigma_neg = []
+        self.x_error = []
+
+    def plot(self):
+        # increase vertical spacing between subplots
+        # https://matplotlib.org/3.1.1/api/_as_gen/matplotlib.pyplot.subplots_adjust.html
+        plt.subplots_adjust(hspace=.4)
+
+        # error covariance plots
+        p1 = plt.figure(1)
+        plt.subplot(211)
+        plt.plot(times, self.v_sigma_neg, 'r', label="Error Covariance")
+        plt.plot(times, self.v_sigma_pos, 'r')
+        plt.plot(times, self.v_error, 'b', alpha=.5, label="Velocity Estimation Error")
+        plt.title("Estimation error and error covariance vs time")
+        plt.ylabel("Error (velocity)")
+        plt.xlabel("Time (s)")
+        plt.legend()
+        plt.subplot(212)
+        plt.plot(times, self.x_sigma_neg, 'r', label="Error Covariance")
+        plt.plot(times, self.x_sigma_pos, 'r')
+        plt.plot(times, self.x_error, 'b', alpha=.5, label="Position Estimation Error")
+        plt.title("Estimation error and error covariance vs time")
+        plt.ylabel("Error (position)")
+        plt.xlabel("Time (s)")
+        plt.legend()
+        p1.show()
+
+        # keep the plots open until user enters Ctrl+D to terminal (EOF)
+        try:
+            input()
+        except EOFError:
+            return
+
+
+class Model():
+    def __init__(self, times, A, B, C, D, R, Q, mu, sigma, control_inputs, seed=None):
+        """
+        @type times: numpy.ndarray
         @type A: numpy.ndarray
         @type B: numpy.ndarray
         @type C: numpy.ndarray
@@ -42,8 +90,11 @@ class Model():
         # ground truth = states (v,x), measrements = output
         self.vtr, self.xtr, self.measurements = self.get_data()
 
+        # for plotting
+        self.plotter = Plotter(times)
+
         # for testing/debugging
-        # self.load_matlab_data()
+        self.load_matlab_data()
 
     def load_matlab_data(self):
         # loading matlab data (for comparison)
@@ -57,7 +108,7 @@ class Model():
         vtr = x['vtr']
         xtr = x['xtr']
         z = x['z']
-
+        
         # try on the matlab data (for comparison)
         self.mu = mu0
         self.sigma = Sig0
@@ -99,12 +150,9 @@ class Model():
         # assume distribution is zero-centered
         noisy_transition = \
             np.random.multivariate_normal(np.zeros(self.Q.shape[0]), self.Q)
-        return noisy_transition
+        return np.reshape(noisy_transition, (-1,1))
 
     def kalman_filter(self):
-        sigma_1 = []
-        sigma_2 = []
-
         for timestep in range(self.control_inputs.size):
             c_input = self.control_inputs[0 , timestep]
             c_input = np.reshape(c_input, (1,1))
@@ -126,15 +174,21 @@ class Model():
             self.mu = mu
             self.sigma = sigma
 
-            sigma_1.append(np.sqrt(sigma[0 , 0]) * 2 * -1)
-            sigma_2.append(np.sqrt(sigma[0 , 0]) * 2)
+            self.plotter.v_sigma_pos.append(np.sqrt(sigma[0 , 0]) * 2)
+            self.plotter.v_sigma_neg.append(np.sqrt(sigma[0 , 0]) * 2 * -1)
+            self.plotter.v_error.append(self.vtr[0 , timestep] - mu[0 , 0])
+            self.plotter.x_sigma_pos.append(np.sqrt(sigma[1 , 1]) * 2)
+            self.plotter.x_sigma_neg.append(np.sqrt(sigma[1 , 1]) * 2 * -1)
+            self.plotter.x_error.append(self.xtr[0 , timestep] - mu[1 , 0])
 
             # print(mu_bar.shape)
             # print(sigma_bar.shape)
             # print(k.shape)
             # print(mu.shape)
             # print(sigma.shape)
-        return sigma_1, sigma_2
+    
+    def plot_results(self):
+        self.plotter.plot()
 
 
 
@@ -174,11 +228,9 @@ control_inputs[0 , 500:600] = -50
 control_inputs[0 , 600:] = 0
 
 # make the robot model
-uuv = Model(sys_d.A, sys_d.B, sys_d.C, sys_d.D, R, Q, mu, sigma, control_inputs, None)
+rand_seed = 5
+uuv = Model(times, sys_d.A, sys_d.B, sys_d.C, sys_d.D, R, Q, 
+    mu, sigma, control_inputs, rand_seed)
 
 uuv.kalman_filter()
-
-s1, s2 = uuv.kalman_filter()
-
-plt.plot(times, s1, times, s2)
-plt.show()
+uuv.plot_results()

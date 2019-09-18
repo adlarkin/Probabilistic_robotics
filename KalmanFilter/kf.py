@@ -101,7 +101,8 @@ class Plotter():
 
 
 class Model():
-    def __init__(self, times, A, B, C, D, R, Q, mu, sigma, control_inputs, seed=None):
+    def __init__(self, times, A, B, C, D, R, Q, 
+        mu, sigma, control_inputs, seed, load_data):
         """
         @type times: numpy.ndarray
         @type A: numpy.ndarray
@@ -135,11 +136,8 @@ class Model():
         # ground truth = states (v,x), measrements = output
         self.vtr, self.xtr, self.measurements = self.get_data()
 
-        # for plotting
-        self.plotter = Plotter(times)
-
-        # for testing/debugging
-        self.load_matlab_data()
+        if load_data:
+            self.load_matlab_data()
 
     def load_matlab_data(self):
         # loading matlab data (for comparison)
@@ -198,6 +196,9 @@ class Model():
         return np.reshape(noisy_transition, (-1,1))
 
     def kalman_filter(self):
+        # for plotting
+        self.plotter = Plotter(times)
+
         for timestep in range(self.control_inputs.size):
             c_input = self.control_inputs[0 , timestep]
             c_input = np.reshape(c_input, (1,1))
@@ -235,16 +236,33 @@ class Model():
             # kalman gain plots
             self.plotter.k_v.append(k[0 , 0])
             self.plotter.k_x.append(k[1 , 0])
-
-            # print(mu_bar.shape)
-            # print(sigma_bar.shape)
-            # print(k.shape)
-            # print(mu.shape)
-            # print(sigma.shape)
     
     def plot_results(self):
         self.plotter.plot()
 
+
+########################################################################################
+############################## DEFINE PARAMETERS HERE ##################################
+########################################################################################
+# use the data from the matlab file, or make our own?
+use_file_data = False
+# eliminate randomness in noise generation? (For debugging)
+rand_seed = None
+# measurement covariance (default = .001)
+z_noise = .001
+# process noise associated with velocity state (default = .01)
+v_noise = .01
+# process noise associated with position state (default = .0001)
+x_noise = .0001
+# timestep (seconds)
+dt = .05
+#  initial belief (initial condition):
+# starting v and x, [[v] , [x]]
+mu = np.array([[0] , [0]])
+# starting covariance, [[v , 0] , [0 , x]]
+sigma = np.array([[1 , 0] , [0 , 1]])
+########################################################################################
+########################################################################################
 
 
 # robot model parameters
@@ -267,12 +285,8 @@ sys_d.C = np.array(sys_d.C)
 sys_d.D = np.array(sys_d.D)
 
 # get the system/measurement noise
-R = np.array([[.01 , 0] , [0 , .0001]])
-Q = np.array([[.001]])
-
-# set the initial belief (initial condition)
-mu = np.array([[0] , [0]])
-sigma = np.array([[.01 , 0] , [0 , .0001]])
+R = np.array([[v_noise , 0] , [0 , x_noise]])
+Q = np.array([[z_noise]])
 
 # set the ground truth control inputs
 times = np.arange(0, 50+dt, dt)
@@ -283,9 +297,8 @@ control_inputs[0 , 500:600] = -50
 control_inputs[0 , 600:] = 0
 
 # make the robot model
-rand_seed = None
 uuv = Model(times, sys_d.A, sys_d.B, sys_d.C, sys_d.D, R, Q, 
-    mu, sigma, control_inputs, rand_seed)
+    mu, sigma, control_inputs, rand_seed, use_file_data)
 
 uuv.kalman_filter()
 uuv.plot_results()

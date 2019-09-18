@@ -15,6 +15,7 @@ class Plotter():
         """
         self.times = times
 
+        # error covariance and estimation error plots
         self.v_sigma_pos = []
         self.v_sigma_neg = []
         self.v_error = []
@@ -23,10 +24,23 @@ class Plotter():
         self.x_sigma_neg = []
         self.x_error = []
 
+        # state estimation plots
+        self.v_pred = []
+        self.v_true = []
+
+        self.x_pred = []
+        self.x_true = []
+
+        # kalman gain plots
+        self.k_v = []
+        self.k_x = []
+
     def plot(self):
         # increase vertical spacing between subplots
         # https://matplotlib.org/3.1.1/api/_as_gen/matplotlib.pyplot.subplots_adjust.html
-        plt.subplots_adjust(hspace=.4)
+        # plt.subplots_adjust(hspace=.4)
+
+        x_label_str = "Time (s)"
 
         # error covariance plots
         p1 = plt.figure(1)
@@ -36,17 +50,48 @@ class Plotter():
         plt.plot(times, self.v_error, 'b', alpha=.5, label="Velocity Estimation Error")
         plt.title("Estimation error and error covariance vs time")
         plt.ylabel("Error (velocity)")
-        plt.xlabel("Time (s)")
         plt.legend()
         plt.subplot(212)
         plt.plot(times, self.x_sigma_neg, 'r', label="Error Covariance")
         plt.plot(times, self.x_sigma_pos, 'r')
         plt.plot(times, self.x_error, 'b', alpha=.5, label="Position Estimation Error")
-        plt.title("Estimation error and error covariance vs time")
         plt.ylabel("Error (position)")
-        plt.xlabel("Time (s)")
+        plt.xlabel(x_label_str)
         plt.legend()
         p1.show()
+
+        # state estimates vs ground truth plots
+        true_opacity = .6
+        pred_opacity = .75
+        p2 = plt.figure(2)
+        plt.subplot(211)
+        plt.plot(times, self.v_true, alpha=true_opacity, label="True Velocity")
+        plt.plot(times, self.v_pred, alpha=pred_opacity, label="Predicted Velocity")
+        plt.title("State estimates and true states vs time")
+        plt.ylabel("Velocity")
+        plt.legend()
+        plt.subplot(212)
+        plt.plot(times, self.x_true, alpha=true_opacity, label="True Position")
+        plt.plot(times, self.x_pred, alpha=pred_opacity, label="Predicted Prosition")
+        plt.ylabel("Postion")
+        plt.xlabel(x_label_str)
+        plt.legend()
+        p2.show()
+
+        # kalman gain plots
+        gain = "Gain"
+        p3 = plt.figure(3)
+        plt.subplot(211)
+        plt.plot(times, self.k_v, label="Velocity")
+        plt.title("Kalman gain vs time")
+        plt.ylabel(gain)
+        plt.legend()
+        plt.subplot(212)
+        plt.plot(times, self.k_x, label="Position")
+        plt.ylabel(gain)
+        plt.xlabel(x_label_str)
+        plt.legend()
+        p3.show()
 
         # keep the plots open until user enters Ctrl+D to terminal (EOF)
         try:
@@ -174,12 +219,22 @@ class Model():
             self.mu = mu
             self.sigma = sigma
 
+            # save info for plotting
+            # error covariance and estimation error plots
             self.plotter.v_sigma_pos.append(np.sqrt(sigma[0 , 0]) * 2)
             self.plotter.v_sigma_neg.append(np.sqrt(sigma[0 , 0]) * 2 * -1)
             self.plotter.v_error.append(self.vtr[0 , timestep] - mu[0 , 0])
             self.plotter.x_sigma_pos.append(np.sqrt(sigma[1 , 1]) * 2)
             self.plotter.x_sigma_neg.append(np.sqrt(sigma[1 , 1]) * 2 * -1)
             self.plotter.x_error.append(self.xtr[0 , timestep] - mu[1 , 0])
+            # state estimation plots
+            self.plotter.v_pred.append(mu[0 , 0])
+            self.plotter.v_true.append(self.vtr[0 , timestep])
+            self.plotter.x_pred.append(mu[1 , 0])
+            self.plotter.x_true.append(self.xtr[0 , timestep])
+            # kalman gain plots
+            self.plotter.k_v.append(k[0 , 0])
+            self.plotter.k_x.append(k[1 , 0])
 
             # print(mu_bar.shape)
             # print(sigma_bar.shape)
@@ -228,7 +283,7 @@ control_inputs[0 , 500:600] = -50
 control_inputs[0 , 600:] = 0
 
 # make the robot model
-rand_seed = 5
+rand_seed = None
 uuv = Model(times, sys_d.A, sys_d.B, sys_d.C, sys_d.D, R, Q, 
     mu, sigma, control_inputs, rand_seed)
 

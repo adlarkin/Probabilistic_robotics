@@ -153,6 +153,14 @@ if __name__ == "__main__":
     bound_x = [np.sqrt(sigma[0 , 0]) * 2]
     bound_y = [np.sqrt(sigma[1 , 1]) * 2]
     bound_theta = [np.sqrt(sigma[2 , 2]) * 2]
+    # needed for plotting kalman gains
+    K_t = None # the kalman gain matrix that gets updated with measurements
+    k_r_x = []
+    k_r_y = []
+    k_r_theta = []
+    k_b_x = []
+    k_b_y = []
+    k_b_theta = []
 
     # run EKF
     for i in range(1,t.size):
@@ -210,10 +218,16 @@ if __name__ == "__main__":
         mu_y[0 , i] = mu[1 , 0]
         mu_theta[0 , i] = mu[2 , 0]
 
-        # save covariances for plot later
+        # save covariances and kalman gains for plot later
         bound_x.append(np.sqrt(sigma[0 , 0]) * 2)
         bound_y.append(np.sqrt(sigma[1 , 1]) * 2)
         bound_theta.append(np.sqrt(sigma[2 , 2]) * 2)
+        k_r_x.append(K_t[0 , 0])
+        k_r_y.append(K_t[1 , 0])
+        k_r_theta.append(K_t[2 , 0])
+        k_b_x.append(K_t[0 , 1])
+        k_b_y.append(K_t[1 , 1])
+        k_b_theta.append(K_t[2 , 1])
 
     # make everything a list (easier for plotting)
     x_pos_true = x_pos_true.tolist()[0]
@@ -258,7 +272,7 @@ if __name__ == "__main__":
         axes.set_xlim(world_bounds_x)
         axes.set_ylim(world_bounds_y)
         axes.set_aspect('equal')
-        plt.pause(.025)
+        plt.pause(.01)
 
     # animation is done, now plot the estimated path
     step = 2
@@ -285,7 +299,7 @@ if __name__ == "__main__":
     plt.xlabel("time (s)")
     p2.show()
 
-    # plot the states over time
+    # plot the uncertainty in states over time
     p3 = plt.figure(3)
     plt.subplot(311)
     plt.plot(t, np.array(x_pos_true) - np.array(mu_x), color='b', label="error")
@@ -305,6 +319,20 @@ if __name__ == "__main__":
     plt.ylabel("heading (rad)")
     plt.xlabel("time (s)")
     p3.show()
+
+    # plot the kalman gains
+    p4 = plt.figure(4)
+    plt.plot(t[1:], k_r_x, label="Range: x position")
+    plt.plot(t[1:], k_r_y, label="Range: y position")
+    plt.plot(t[1:], k_r_theta, label="Range: theta")
+    plt.plot(t[1:], k_b_x, label="Bearing: x position")
+    plt.plot(t[1:], k_b_y, label="Bearing: y position")
+    plt.plot(t[1:], k_b_theta, label="Bearing: theta")
+    plt.title("Kalman gains")
+    plt.ylabel("Gain")
+    plt.xlabel("time (s)")
+    plt.legend()
+    p4.show()
 
     # keep the plots open until user enters Ctrl+D to terminal (EOF)
     try:

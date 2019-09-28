@@ -142,9 +142,32 @@ if __name__ == "__main__":
         y_pos_true[0 , 0] = -3
         theta_true[0 , 0] = np.pi / 2
 
-        # TODO create my own ground truth data here
+        # create my own ground truth states and input
         for timestep in range(1, t.size):
-            pass
+            # get previous ground truth state
+            prev_state = np.array([x_pos_true[0 , timestep-1], 
+                                    y_pos_true[0 , timestep-1],
+                                    theta_true[0, timestep-1]])
+            prev_state = np.reshape(prev_state, (-1,1))
+            theta_prev = theta_true[0 , timestep-1]
+
+            # get next ground truth input
+            noise_free_input = \
+                np.array([get_vel_input(t[0,timestep]), get_omega_input(t[0,timestep])])
+            noise_free_input = np.reshape(noise_free_input, (-1,1))
+            input_noise_matrix = get_M_t(alpha_1, alpha_2, alpha_3, alpha_4, 
+                noise_free_input[0,0], noise_free_input[1,0])
+            noisy_input = noise_free_input + make_noise(input_noise_matrix)
+            velocity[0,timestep] = noisy_input[0,0]
+            omega[0,timestep] = noisy_input[1,0]
+
+            # get next ground truth state using previous ground truth state
+            # and next ground truth input
+            next_state = get_mu_bar(prev_state, velocity[0,timestep], 
+                omega[0,timestep], theta_prev, dt)
+            x_pos_true[0,timestep] = next_state[0,0]
+            y_pos_true[0,timestep] = next_state[1,0]
+            theta_true[0,timestep] = next_state[2,0]
 
     mu = np.array([mu_x[0,0], mu_y[0,0], mu_theta[0,0]])
     mu = np.reshape(mu, (-1, 1))
@@ -164,8 +187,8 @@ if __name__ == "__main__":
 
     # run EKF
     for i in range(1,t.size):
-        curr_v = velocity[0,i]
-        curr_w = omega[0,i]
+        curr_v = get_vel_input(t[0,i])
+        curr_w = get_omega_input(t[0,i])
         prev_theta = mu_theta[0,i-1]
 
         G_t = get_G_t(curr_v, curr_w, prev_theta, dt)
@@ -272,7 +295,7 @@ if __name__ == "__main__":
         axes.set_xlim(world_bounds_x)
         axes.set_ylim(world_bounds_y)
         axes.set_aspect('equal')
-        plt.pause(.01)
+        plt.pause(.0025)
 
     # animation is done, now plot the estimated path
     step = 2

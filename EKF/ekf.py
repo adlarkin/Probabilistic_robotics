@@ -78,7 +78,7 @@ if __name__ == "__main__":
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
-    use_mat_data = True
+    use_mat_data = False
     # noise in the command velocities (translational and rotational)
     alpha_1 = .1
     alpha_2 = .01
@@ -150,7 +150,6 @@ if __name__ == "__main__":
                                     theta_true[0, timestep-1]])
             prev_state = np.reshape(prev_state, (-1,1))
             theta_prev = theta_true[0 , timestep-1]
-
             # get next ground truth input
             noise_free_input = \
                 np.array([get_vel_input(t[0,timestep]), get_omega_input(t[0,timestep])])
@@ -173,9 +172,9 @@ if __name__ == "__main__":
     mu = np.reshape(mu, (-1, 1))
 
     # needed for plotting covariance bounds vs values
-    bound_x = [np.sqrt(sigma[0 , 0]) * 2]
-    bound_y = [np.sqrt(sigma[1 , 1]) * 2]
-    bound_theta = [np.sqrt(sigma[2 , 2]) * 2]
+    bound_x = [0]
+    bound_y = [0]
+    bound_theta = [0]
     # needed for plotting kalman gains
     K_t = None # the kalman gain matrix that gets updated with measurements
     k_r_x = []

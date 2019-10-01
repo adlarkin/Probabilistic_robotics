@@ -78,7 +78,7 @@ if __name__ == "__main__":
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
-    use_mat_data = True
+    use_mat_data = False
     # noise in the command velocities (translational and rotational)
     alpha_1 = .1
     alpha_2 = .01
@@ -172,9 +172,9 @@ if __name__ == "__main__":
     mu = np.reshape(mu, (-1, 1))
 
     # needed for plotting covariance bounds vs values
-    bound_x = [0]
-    bound_y = [0]
-    bound_theta = [0]
+    bound_x = [np.sqrt(sigma[0 , 0]) * 2]
+    bound_y = [np.sqrt(sigma[1 , 1]) * 2]
+    bound_theta = [np.sqrt(sigma[2 , 2]) * 2]
     # needed for plotting kalman gains
     K_t = None # the kalman gain matrix that gets updated with measurements
     k_r_x = []
@@ -277,6 +277,10 @@ if __name__ == "__main__":
 
         # clear the figure before plotting the next phase
         plt.clf()
+
+        # plot the path up to the current point in time
+        plt.plot(mu_x[:i+1], mu_y[:i+1], color='r', label="predicted", zorder=-2)
+        plt.plot(x_pos_true[:i+1], y_pos_true[:i+1], color='b', label="truth", zorder=-1)
         
         # get the robot pose
         body = get_circle(center, radius, yellow, black)
@@ -297,9 +301,6 @@ if __name__ == "__main__":
         plt.pause(.001)
 
     # animation is done, now plot the estimated path
-    step = 2
-    plt.plot(mu_x[::step], mu_y[::step], '.', color='r', label="predicted")
-    plt.plot(x_pos_true[::step], y_pos_true[::step], '.', color='b', label="truth")
     plt.legend()
     p1.show()
 

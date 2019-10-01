@@ -78,7 +78,7 @@ if __name__ == "__main__":
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
-    use_mat_data = False
+    use_mat_data = True
     # noise in the command velocities (translational and rotational)
     alpha_1 = .1
     alpha_2 = .01
@@ -294,7 +294,7 @@ if __name__ == "__main__":
         axes.set_xlim(world_bounds_x)
         axes.set_ylim(world_bounds_y)
         axes.set_aspect('equal')
-        plt.pause(.0025)
+        plt.pause(.001)
 
     # animation is done, now plot the estimated path
     step = 2

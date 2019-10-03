@@ -6,14 +6,57 @@ from numpy.linalg import inv as mat_inv
 from scipy.io import loadmat
 import pdb
 from numpy.random import normal as randn
+from matplotlib import animation
 
-def get_circle(center, radius, body_color, edge_color):
-    return plt.Circle(center, radius=radius, color=body_color, ec=edge_color)
+def animate(true_states, belief_states, markers):
+    x_tr, y_tr, th_tr = true_states
+    x_guess, y_guess = belief_states
+    
+    radius = .5
+    yellow = (1,1,0)
+    black = 'k'
+    world_bounds = [-10,10]
+    
+    fig = plt.figure()
+    ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
+    ax.set_aspect('equal')
+    ax.plot(markers[0], markers[1], '+', color=black)
+    actual_path, = ax.plot([], [], color='b', zorder=-2, label="Actual")
+    pred_path, = ax.plot([], [], color='r', zorder=-1, label="Predicted")
+    heading, = ax.plot([], [], color=black)
+    robot = plt.Circle((x_tr[0],y_tr[0]), radius=radius, color=yellow, ec=black)
+    ax.add_artist(robot)
+    ax.legend()
 
-def get_pose(center, theta, radius):
-    x_rotation = [center[0], center[0] + radius*np.cos(theta)]
-    y_rotation = [center[1], center[1] + radius*np.sin(theta)]
-    return x_rotation, y_rotation
+    def init():
+        actual_path.set_data([], [])
+        pred_path.set_data([], [])
+        heading.set_data([], [])
+        return actual_path, pred_path, heading, robot
+
+    def animate(i):
+        actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
+        pred_path.set_data(x_guess[:i+1], y_guess[:i+1])
+        heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
+            [y_tr[i], y_tr[i] + radius*sin(th_tr[i])])
+        robot.center = (x_tr[i],y_tr[i])
+        return actual_path, pred_path, heading, robot
+
+    anim = animation.FuncAnimation(fig, animate, init_func=init,
+        frames=len(x_tr), interval=20, blit=True, repeat=False)
+    
+    plt.pause(.1)
+    input("<Hit enter to close>")
+
+def get_fwd_propogation(vel, om, th, delta_t):
+    move_forward = np.zeros((3,1))
+    ratio = vel/om
+    move_forward[0,0] = ( -ratio * sin(th) ) + \
+        ( ratio * sin(th + (om*delta_t)) )
+    move_forward[1,0] = ( ratio * cos(th) ) - \
+        ( ratio * cos(th + (om*delta_t)) )
+    move_forward[2,0] = om*delta_t
+    return move_forward
 
 if __name__ == "__main__":
     dt = .1
@@ -24,21 +67,6 @@ if __name__ == "__main__":
     mu_x = np.zeros(t.shape)
     mu_y = np.zeros(t.shape)
     mu_theta = np.zeros(t.shape)   # radians
-
-    # control inputs
-    velocity = np.zeros(t.shape)
-    omega = np.zeros(t.shape)
-
-    # landmarks (x and y coordinates)
-    lm_x = [6, -7, 6]
-    lm_y = [4, 8, -4]
-    assert(len(lm_x) == len(lm_y))
-    num_landmarks = len(lm_x)
-
-    # ground truth
-    x_pos_true = np.zeros(t.shape)
-    y_pos_true = np.zeros(t.shape)
-    theta_true = np.zeros(t.shape)  # radians
 
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
@@ -53,13 +81,13 @@ if __name__ == "__main__":
     std_dev_range = .1
     std_dev_bearing = .05
     # starting belief - initial condition (robot pose)
-    mu_x[0 , 0] = -5
-    mu_y[0 , 0] = -3
-    mu_theta[0 , 0] = (np.pi / 2)
+    mu_x[0 , 0] = -5 + .5
+    mu_y[0 , 0] = -3 - .7
+    mu_theta[0 , 0] = (np.pi / 2) - .05
     # initial uncertainty in the belief
     sigma = np.array([
-                        [.1, 0, 0],  # x
-                        [0, .1, 0],  # y
+                        [1, 0, 0],  # x
+                        [0, 1, 0],  # y
                         [0, 0, .1]  # theta
                     ])
     # unscented transform params
@@ -68,6 +96,25 @@ if __name__ == "__main__":
     beta = 2
     ########################################################################################
     ########################################################################################
+
+    # landmarks (x and y coordinates)
+    lm_x = [6, -7, 6]
+    lm_y = [4, 8, -4]
+    assert(len(lm_x) == len(lm_y))
+    num_landmarks = len(lm_x)
+
+    # noise free inputs (NOT ground truth)
+    v_c = 1 + (.5*cos(2*np.pi*.2*t))
+    om_c = -.2 + (2*cos(2*np.pi*.6*t))
+
+    # ground truth
+    x_pos_true = np.zeros(t.shape)
+    y_pos_true = np.zeros(t.shape)
+    theta_true = np.zeros(t.shape)  # radians
+
+    # control inputs (truth ... with noise)
+    velocity = v_c + randn(scale=np.sqrt( (alpha_1*(v_c**2)) + (alpha_2*(om_c**2)) ))
+    omega = om_c + randn(scale=np.sqrt( (alpha_3*(v_c**2)) + (alpha_4*(om_c**2)) ))
 
     # uncertainty due to measurement noise
     Q_t = np.array([
@@ -93,8 +140,29 @@ if __name__ == "__main__":
         y_pos_true = x['y']
         theta_true = x['th']
     else:
-        # TODO make new ground truth data
-        pass
+        # make new ground truth data
+
+        # robot has initial condition of position (-5,-3) and 90 degree orientation
+        x_pos_true[0 , 0] = -5
+        y_pos_true[0 , 0] = -3
+        theta_true[0 , 0] = np.pi / 2
+
+        # create my own ground truth states and input
+        for timestep in range(1, t.size):
+            # get previous ground truth state
+            prev_state = np.array([x_pos_true[0 , timestep-1], 
+                                    y_pos_true[0 , timestep-1],
+                                    theta_true[0, timestep-1]])
+            prev_state = np.reshape(prev_state, (-1,1))
+            theta_prev = theta_true[0 , timestep-1]
+
+            # get next ground truth state using previous ground truth state
+            # and next ground truth input
+            next_state = prev_state + \
+                get_fwd_propogation(velocity[0,timestep], omega[0,timestep], theta_prev, dt)
+            x_pos_true[0,timestep] = next_state[0,0]
+            y_pos_true[0,timestep] = next_state[1,0]
+            theta_true[0,timestep] = next_state[2,0]
 
     # needed for plotting covariance bounds vs values
     bound_x = [0]
@@ -119,8 +187,8 @@ if __name__ == "__main__":
     for t_step in range(1,t.size):
         time = t[0,t_step]
         # control inputs
-        vel = 1 + (.5*cos(2*np.pi*.2*time))
-        omega = -.2 + (2*cos(2*np.pi*.6*time))
+        vel = v_c[0,t_step]
+        omega = om_c[0,t_step]
 
         # generate augmented mean and covariance
         M_t = np.zeros((2,2))
@@ -154,12 +222,7 @@ if __name__ == "__main__":
             v_new = chi_aug[3,pt] + vel
             om_new = chi_aug[4,pt] + omega
             # (save how model propogates forward with new input)
-            forward_input = np.zeros((3,1))
-            forward_input[0,0] = ( (-v_new/om_new) * sin(angle) ) + \
-                ( (v_new/om_new) * sin(angle + (om_new*dt)) )
-            forward_input[1,0] = ( (v_new/om_new) * cos(angle) ) - \
-                ( (v_new/om_new) * cos(angle + (om_new*dt)) )
-            forward_input[2,0] = om_new*dt
+            forward_input = get_fwd_propogation(v_new, om_new, angle, dt)
             # (save new state based on propogation and previously sampled state)
             chi_bar_x[:,pt] = chi_aug[0:3,pt] + forward_input[:,0]
         # (make mean and covariance weights)
@@ -223,53 +286,42 @@ if __name__ == "__main__":
 
             # update mean and covariance
             K_t = mm(sigma_t, mat_inv(S_t))
-        break
-    '''
+            mu_bar = mu_bar + mm(K_t, z_true - z_hat)
+            sigma_bar = sigma_bar - mm(K_t, mm(S_t, np.transpose(K_t)))
+
+        # update belief
+        mu = mu_bar
+        sigma = sigma_bar
+        mu_x[0 , t_step] = mu[0 , 0]
+        mu_y[0 , t_step] = mu[1 , 0]
+        mu_theta[0 , t_step] = mu[2 , 0]
+
+        # save covariances and kalman gains for plot later
+        bound_x.append(np.sqrt(sigma[0 , 0]) * 2)
+        bound_y.append(np.sqrt(sigma[1 , 1]) * 2)
+        bound_theta.append(np.sqrt(sigma[2 , 2]) * 2)
+        k_r_x.append(K_t[0 , 0])
+        k_r_y.append(K_t[1 , 0])
+        k_r_theta.append(K_t[2 , 0])
+        k_b_x.append(K_t[0 , 1])
+        k_b_y.append(K_t[1 , 1])
+        k_b_theta.append(K_t[2 , 1])
+
+    # make everything a list (easier for plotting)
+    x_pos_true = x_pos_true.tolist()[0]
+    y_pos_true = y_pos_true.tolist()[0]
+    theta_true = theta_true.tolist()[0]
+    mu_x = mu_x.tolist()[0]
+    mu_y = mu_y.tolist()[0]
+    mu_theta = mu_theta.tolist()[0]
+    t = t.tolist()[0]
+
     ###############################################################################
     ###############################################################################
-    # animate and plot
-    radius = .5
-    yellow = (1,1,0)
-    black = 'k'
-
-    world_bounds_x = [-10,10]
-    world_bounds_y = [-10,10]
-    
-    p1 = plt.figure(1)
-    for i in range(len(x_pos_true)):
-        theta = theta_true[i]
-        center = (x_pos_true[i],y_pos_true[i])
-
-        # clear the figure before plotting the next phase
-        plt.clf()
-        
-        # get the robot pose
-        body = get_circle(center, radius, yellow, black)
-        orientation_x, orientation_y = \
-            get_pose(center, theta, radius)
-        # plot the robot pose
-        plt.plot(orientation_x, orientation_y, color=black)
-        axes = plt.gca()
-        axes.add_patch(body)
-
-        # plot the markers
-        plt.plot(lm_x, lm_y, '+', color=black)
-
-        # animate (keep axis limits constant and make the figure a square)
-        axes.set_xlim(world_bounds_x)
-        axes.set_ylim(world_bounds_y)
-        axes.set_aspect('equal')
-        plt.pause(.001)
-
-    # animation is done, now plot the estimated path
-    step = 2
-    plt.plot(mu_x[::step], mu_y[::step], '.', color='r', label="predicted")
-    plt.plot(x_pos_true[::step], y_pos_true[::step], '.', color='b', label="truth")
-    plt.legend()
-    p1.show()
+    # show plots and animation
 
     # plot the states over time
-    p2 = plt.figure(2)
+    p1 = plt.figure(1)
     plt.subplot(311)
     plt.plot(t, x_pos_true, label="true")
     plt.plot(t, mu_x, label="predicted")
@@ -284,10 +336,10 @@ if __name__ == "__main__":
     plt.plot(t, mu_theta)
     plt.ylabel("heading (rad)")
     plt.xlabel("time (s)")
-    p2.show()
+    plt.draw()
 
     # plot the uncertainty in states over time
-    p3 = plt.figure(3)
+    p2 = plt.figure(2)
     plt.subplot(311)
     plt.plot(t, np.array(x_pos_true) - np.array(mu_x), color='b', label="error")
     plt.plot(t, bound_x, color='r', label="uncertainty")
@@ -305,10 +357,10 @@ if __name__ == "__main__":
     plt.plot(t, [x * -1 for x in bound_theta], color='r')
     plt.ylabel("heading (rad)")
     plt.xlabel("time (s)")
-    p3.show()
+    plt.draw()
 
     # plot the kalman gains
-    p4 = plt.figure(4)
+    p3 = plt.figure(3)
     plt.plot(t[1:], k_r_x, label="Range: x position")
     plt.plot(t[1:], k_r_y, label="Range: y position")
     plt.plot(t[1:], k_r_theta, label="Range: theta")
@@ -319,13 +371,8 @@ if __name__ == "__main__":
     plt.ylabel("Gain")
     plt.xlabel("time (s)")
     plt.legend()
-    p4.show()
+    plt.draw()
 
-    # keep the plots open until user enters Ctrl+D to terminal (EOF)
-    try:
-        input()
-    except EOFError:
-        pass
+    animate((x_pos_true, y_pos_true, theta_true), (mu_x, mu_y), (lm_x, lm_y))
     ###############################################################################
     ###############################################################################
-    '''

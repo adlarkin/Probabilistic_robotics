@@ -48,14 +48,15 @@ def animate(true_states, belief_states, markers):
     plt.pause(.1)
     input("<Hit enter to close>")
 
-def get_fwd_propogation(vel, om, th, delta_t):
+def get_fwd_propogation(vel, om, th, delta_t, apply_ctrl_inputs=True):
     move_forward = np.zeros((3,1))
-    ratio = vel/om
-    move_forward[0,0] = ( -ratio * sin(th) ) + \
-        ( ratio * sin(th + (om*delta_t)) )
-    move_forward[1,0] = ( ratio * cos(th) ) - \
-        ( ratio * cos(th + (om*delta_t)) )
-    move_forward[2,0] = om*delta_t
+    if apply_ctrl_inputs:
+        ratio = vel/om
+        move_forward[0,0] = ( -ratio * sin(th) ) + \
+            ( ratio * sin(th + (om*delta_t)) )
+        move_forward[1,0] = ( ratio * cos(th) ) - \
+            ( ratio * cos(th + (om*delta_t)) )
+        move_forward[2,0] = om*delta_t
     return move_forward
 
 def get_mu_t_aug(state_vec):
@@ -78,7 +79,7 @@ def get_chi_aug(augmented_mu, augmented_sig, g):
     chi_a[:,8:] = augmented_mu - mat_sq_root
     return chi_a
 
-def get_chi_bar_x(v, om, augmented_chi):
+def get_chi_bar_x(v, om, augmented_chi, apply_movement):
     chi_b_x = np.zeros((3,15))
     for pt in range(chi_b_x.shape[1]):
         # (get new input based on original input and sampled inputs)
@@ -86,7 +87,7 @@ def get_chi_bar_x(v, om, augmented_chi):
         om_new = augmented_chi[4,pt] + om
         angle = augmented_chi[2,pt]
         # (save how model propogates forward with new input)
-        forward_input = get_fwd_propogation(v_new, om_new, angle, dt)
+        forward_input = get_fwd_propogation(v_new, om_new, angle, dt, apply_movement)
         # (save new state based on propogation and previously sampled state)
         chi_b_x[:,pt] = augmented_chi[0:3,pt] + forward_input[:,0]
     return chi_b_x
@@ -235,6 +236,7 @@ if __name__ == "__main__":
     k_b_theta = []
 
     # run UKF
+    print("Running UKF...")
     mu = np.array([mu_x[0,0], mu_y[0,0], mu_theta[0,0]])
     mu = np.reshape(mu, (-1, 1))
     for t_step in range(1,t.size):
@@ -243,38 +245,43 @@ if __name__ == "__main__":
         vel = v_c[0,t_step]
         omega = om_c[0,t_step]
 
-        # generate augmented mean and covariance
         M_t = np.zeros((2,2))
         M_t[0,0] = (alpha_1 * vel * vel) + (alpha_2 * omega * omega)
         M_t[1,1] = (alpha_3 * vel * vel) + (alpha_4 * omega * omega)
         Q_t = np.zeros((2,2))
         Q_t[0,0] = std_dev_range * std_dev_range
         Q_t[1,1] = std_dev_bearing * std_dev_bearing
-        mu_t_aug = get_mu_t_aug(mu)
-        sig_aug = get_sig_aug(sigma, M_t, Q_t)
-        # (save dimensionality for later)
-        L = mu_t_aug.shape[0]
-        two_L_bound = (2*L) + 1
-        # (ut parameters)
-        my_lambda = ((ut_alpha * ut_alpha) * (L + kappa)) - L
-        gamma = np.sqrt(L + my_lambda)
 
-        # generate sigma points
-        chi_aug = get_chi_aug(mu_t_aug, sig_aug, gamma)
-
-        # pass sigma points through motion model and compute gaussian statistics
-        chi_bar_x = get_chi_bar_x(vel, omega, chi_aug)
-        weights_m, weights_c = get_mean_and_covar_weights(ut_alpha, beta, my_lambda, L)
-        mu_bar, sigma_bar = \
-            get_mu_and_sig_bar(two_L_bound, weights_m, weights_c, chi_bar_x)
-
-        # predict observations at sigma points and compute gaussian statistics
         for i in range(num_landmarks):
+            use_ctrl_inputs = True
             if i > 0:
-                # only doing one landmark for now
-                # later, this means we are one the second landmark
-                # this means we need to resample points
-                break
+                # resampling for a new landmark
+                # we have already applied the control inputs for this timestep
+                # (this was done before taking the first sensor measurement),
+                # so we won't apply the control inputs again since we are just
+                # taking another sensor measurement
+                use_ctrl_inputs = False
+
+            # generate augmented mean and covariance
+            mu_t_aug = get_mu_t_aug(mu)
+            sig_aug = get_sig_aug(sigma, M_t, Q_t)
+            # (save dimensionality for later)
+            L = mu_t_aug.shape[0]
+            two_L_bound = (2*L) + 1
+            # (ut parameters)
+            my_lambda = ((ut_alpha * ut_alpha) * (L + kappa)) - L
+            gamma = np.sqrt(L + my_lambda)
+
+            # generate sigma points
+            chi_aug = get_chi_aug(mu_t_aug, sig_aug, gamma)
+
+            # pass sigma points through motion model and compute gaussian statistics
+            chi_bar_x = get_chi_bar_x(vel, omega, chi_aug, use_ctrl_inputs)
+            weights_m, weights_c = get_mean_and_covar_weights(ut_alpha, beta, my_lambda, L)
+            mu_bar, sigma_bar = \
+                get_mu_and_sig_bar(two_L_bound, weights_m, weights_c, chi_bar_x)
+
+            # predict observations at sigma points and compute gaussian statistics
             Z_bar_t = np.zeros((2,15))
             for pt in range(Z_bar_t.shape[1]):
                 bel_x = chi_bar_x[0,pt]
@@ -310,19 +317,15 @@ if __name__ == "__main__":
             z_true[0,0] = np.sqrt(q) + randn(scale=std_dev_range)
             z_true[1,0] = arctan2(y_diff, x_diff) - true_theta + randn(scale=std_dev_bearing)
 
-            # update mean and covariance
+            # update mean (belief) and covariance
             K_t = mm(sigma_t, mat_inv(S_t))
-            mu_bar = mu_bar + mm(K_t, z_true - z_hat)
-            sigma_bar = sigma_bar - mm(K_t, mm(S_t, np.transpose(K_t)))
+            mu = mu_bar + mm(K_t, z_true - z_hat)
+            sigma = sigma_bar - mm(K_t, mm(S_t, np.transpose(K_t)))
 
-        # update belief
-        mu = mu_bar
-        sigma = sigma_bar
+        # save belief, covariances and kalman gains for plot later
         mu_x[0 , t_step] = mu[0 , 0]
         mu_y[0 , t_step] = mu[1 , 0]
         mu_theta[0 , t_step] = mu[2 , 0]
-
-        # save covariances and kalman gains for plot later
         bound_x.append(np.sqrt(sigma[0 , 0]) * 2)
         bound_y.append(np.sqrt(sigma[1 , 1]) * 2)
         bound_theta.append(np.sqrt(sigma[2 , 2]) * 2)

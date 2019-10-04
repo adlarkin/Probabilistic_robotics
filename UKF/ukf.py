@@ -58,6 +58,62 @@ def get_fwd_propogation(vel, om, th, delta_t):
     move_forward[2,0] = om*delta_t
     return move_forward
 
+def get_mu_t_aug(state_vec):
+    mu_t_a = np.zeros((7,1))
+    mu_t_a[0:3,0] = state_vec[:,0]
+    return mu_t_a
+
+def get_sig_aug(sig, m, q):
+    sig_a = np.zeros((7,7))
+    sig_a[0:3,0:3] = sig
+    sig_a[3:5,3:5] = m
+    sig_a[5: ,5: ] = q
+    return sig_a
+
+def get_chi_aug(augmented_mu, augmented_sig, g):
+    chi_a = np.zeros((7,15))
+    chi_a[:,0] = augmented_mu[:,0]
+    mat_sq_root = g * np.linalg.cholesky(augmented_sig)
+    chi_a[:,1:8] = augmented_mu + mat_sq_root
+    chi_a[:,8:] = augmented_mu - mat_sq_root
+    return chi_a
+
+def get_chi_bar_x(v, om, augmented_chi):
+    chi_b_x = np.zeros((3,15))
+    for pt in range(chi_b_x.shape[1]):
+        # (get new input based on original input and sampled inputs)
+        v_new = augmented_chi[3,pt] + v
+        om_new = augmented_chi[4,pt] + om
+        angle = augmented_chi[2,pt]
+        # (save how model propogates forward with new input)
+        forward_input = get_fwd_propogation(v_new, om_new, angle, dt)
+        # (save new state based on propogation and previously sampled state)
+        chi_b_x[:,pt] = augmented_chi[0:3,pt] + forward_input[:,0]
+    return chi_b_x
+
+def get_mean_and_covar_weights(a, b, lmbda, dimensionality):
+    # a = alpha, b = beta, dimensionality = L
+    weights_mean = np.zeros((1,15))
+    weights_mean[0,0] = lmbda / (dimensionality + lmbda)
+    weights_covar = np.zeros((1,15))
+    weights_covar[0,0] = weights_mean[0,0] + (1 - (a * a) + b)
+    val = 1 / ( 2 * (dimensionality + lmbda) )
+    weights_mean[0,1:] = val
+    weights_covar[0,1:] = val
+    return weights_mean, weights_covar
+
+def get_mu_and_sig_bar(dimensionality_bound, w_m, w_c, chi_b_x):
+    new_bel = np.zeros((3,1))
+    for pt in range(dimensionality_bound):
+        new_bel += w_m[0,pt] * np.reshape(chi_b_x[:,pt], new_bel.shape)
+
+    new_sig = np.zeros((3,3))
+    for pt in range(dimensionality_bound):
+        state_diff = np.reshape(chi_b_x[:,pt], new_bel.shape) - new_bel
+        new_sig += w_c[0,pt] * mm(state_diff, np.transpose(state_diff))
+
+    return new_bel, new_sig
+
 if __name__ == "__main__":
     dt = .1
     t = np.arange(0, 20+dt, dt)
@@ -194,12 +250,8 @@ if __name__ == "__main__":
         Q_t = np.zeros((2,2))
         Q_t[0,0] = std_dev_range * std_dev_range
         Q_t[1,1] = std_dev_bearing * std_dev_bearing
-        mu_t_aug = np.zeros((7,1))
-        mu_t_aug[0:3,0] = mu[:,0]
-        sig_aug = np.zeros((7,7))
-        sig_aug[0:3,0:3] = sigma
-        sig_aug[3:5,3:5] = M_t
-        sig_aug[5: ,5: ] = Q_t
+        mu_t_aug = get_mu_t_aug(mu)
+        sig_aug = get_sig_aug(sigma, M_t, Q_t)
         # (save dimensionality for later)
         L = mu_t_aug.shape[0]
         two_L_bound = (2*L) + 1
@@ -208,40 +260,13 @@ if __name__ == "__main__":
         gamma = np.sqrt(L + my_lambda)
 
         # generate sigma points
-        chi_aug = np.zeros((7,15))
-        chi_aug[:,0] = mu_t_aug[:,0]
-        mat_sq_root = gamma * np.linalg.cholesky(sig_aug)
-        chi_aug[:,1:8] = mu_t_aug + mat_sq_root
-        chi_aug[:,8:] = mu_t_aug - mat_sq_root
+        chi_aug = get_chi_aug(mu_t_aug, sig_aug, gamma)
 
         # pass sigma points through motion model and compute gaussian statistics
-        chi_bar_x = np.zeros((3,15))
-        for pt in range(chi_bar_x.shape[1]):
-            # (get new input based on original input and sampled inputs)
-            v_new = chi_aug[3,pt] + vel
-            om_new = chi_aug[4,pt] + omega
-            angle = chi_aug[2,pt]
-            # (save how model propogates forward with new input)
-            forward_input = get_fwd_propogation(v_new, om_new, angle, dt)
-            # (save new state based on propogation and previously sampled state)
-            chi_bar_x[:,pt] = chi_aug[0:3,pt] + forward_input[:,0]
-        # (make mean and covariance weights)
-        weights_m = np.zeros((1,15))
-        weights_m[0,0] = my_lambda / (L + my_lambda)
-        weights_c = np.zeros((1,15))
-        weights_c[0,0] = weights_m[0,0] + (1 - (ut_alpha * ut_alpha) + beta)
-        val = 1 / ( 2 * (L + my_lambda) )
-        weights_m[0,1:] = val
-        weights_c[0,1:] = val
-        # (get new belief)
-        mu_bar = np.zeros(mu.shape)
-        for pt in range(two_L_bound):
-            mu_bar += weights_m[0,pt] * np.reshape(chi_bar_x[:,pt], mu_bar.shape)
-        # (get new uncertainty)
-        sigma_bar = np.zeros(sigma.shape)
-        for pt in range(two_L_bound):
-            state_diff = np.reshape(chi_bar_x[:,pt], mu_bar.shape) - mu_bar
-            sigma_bar += weights_c[0,pt] * mm(state_diff, np.transpose(state_diff))
+        chi_bar_x = get_chi_bar_x(vel, omega, chi_aug)
+        weights_m, weights_c = get_mean_and_covar_weights(ut_alpha, beta, my_lambda, L)
+        mu_bar, sigma_bar = \
+            get_mu_and_sig_bar(two_L_bound, weights_m, weights_c, chi_bar_x)
 
         # predict observations at sigma points and compute gaussian statistics
         for i in range(num_landmarks):

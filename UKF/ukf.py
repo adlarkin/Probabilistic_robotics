@@ -72,6 +72,7 @@ if __name__ == "__main__":
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
     use_mat_data = False
+    np.random.seed(None)    # reproduce noise?
     # noise in the command velocities (translational and rotational)
     alpha_1 = .1
     alpha_2 = .01
@@ -128,7 +129,7 @@ if __name__ == "__main__":
 
         # all loaded vars are numpy arrays
         # all have shape of (1, 201)
-        x = loadmat('hw2_soln_data.mat')
+        x = loadmat('hw3_soln_data.mat')
         
         # time
         t = x['t']
@@ -165,9 +166,9 @@ if __name__ == "__main__":
             theta_true[0,timestep] = next_state[2,0]
 
     # needed for plotting covariance bounds vs values
-    bound_x = [0]
-    bound_y = [0]
-    bound_theta = [0]
+    bound_x = [np.sqrt(sigma[0 , 0]) * 2]
+    bound_y = [np.sqrt(sigma[1 , 1]) * 2]
+    bound_theta = [np.sqrt(sigma[2 , 2]) * 2]
     # needed for plotting kalman gains
     K_t = None # the kalman gain matrix that gets updated with measurements
     k_r_x = []
@@ -180,10 +181,6 @@ if __name__ == "__main__":
     # run UKF
     mu = np.array([mu_x[0,0], mu_y[0,0], mu_theta[0,0]])
     mu = np.reshape(mu, (-1, 1))
-    # (ut parameters)
-    n = mu.size
-    my_lambda = ((ut_alpha * ut_alpha) * (n + kappa)) - n
-    gamma = np.sqrt(n + my_lambda)
     for t_step in range(1,t.size):
         time = t[0,t_step]
         # control inputs
@@ -206,6 +203,9 @@ if __name__ == "__main__":
         # (save dimensionality for later)
         L = mu_t_aug.shape[0]
         two_L_bound = (2*L) + 1
+        # (ut parameters)
+        my_lambda = ((ut_alpha * ut_alpha) * (L + kappa)) - L
+        gamma = np.sqrt(L + my_lambda)
 
         # generate sigma points
         chi_aug = np.zeros((7,15))
@@ -216,11 +216,11 @@ if __name__ == "__main__":
 
         # pass sigma points through motion model and compute gaussian statistics
         chi_bar_x = np.zeros((3,15))
-        angle = mu[2,0]
         for pt in range(chi_bar_x.shape[1]):
             # (get new input based on original input and sampled inputs)
             v_new = chi_aug[3,pt] + vel
             om_new = chi_aug[4,pt] + omega
+            angle = chi_aug[2,pt]
             # (save how model propogates forward with new input)
             forward_input = get_fwd_propogation(v_new, om_new, angle, dt)
             # (save new state based on propogation and previously sampled state)
@@ -230,10 +230,9 @@ if __name__ == "__main__":
         weights_m[0,0] = my_lambda / (L + my_lambda)
         weights_c = np.zeros((1,15))
         weights_c[0,0] = weights_m[0,0] + (1 - (ut_alpha * ut_alpha) + beta)
-        for pt in range(1,weights_m.shape[1]):
-            val = 1 / ( 2 * (L + my_lambda) )
-            weights_m[0,pt] = val
-            weights_c[0,pt] = val
+        val = 1 / ( 2 * (L + my_lambda) )
+        weights_m[0,1:] = val
+        weights_c[0,1:] = val
         # (get new belief)
         mu_bar = np.zeros(mu.shape)
         for pt in range(two_L_bound):
@@ -256,9 +255,11 @@ if __name__ == "__main__":
                 bel_x = chi_bar_x[0,pt]
                 bel_y = chi_bar_x[1,pt]
                 bel_theta = chi_bar_x[2,pt]
-                q = ( (lm_x[i] - bel_x) ** 2 ) + ( (lm_y[i] - bel_y) ** 2 )
+                x_diff = lm_x[i] - bel_x
+                y_diff = lm_y[i] - bel_y
+                q = ( x_diff * x_diff ) + ( y_diff * y_diff )
                 Z_bar_t[0,pt] = np.sqrt(q)
-                Z_bar_t[1,pt] = arctan2(lm_y[i] - bel_y, lm_x[i] - bel_x) - bel_theta
+                Z_bar_t[1,pt] = arctan2(y_diff, x_diff) - bel_theta
             Z_bar_t += chi_aug[-2:,:]
             z_hat = np.zeros((2,1))
             for pt in range(two_L_bound):

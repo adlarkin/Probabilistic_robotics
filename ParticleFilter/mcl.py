@@ -11,45 +11,8 @@ from scipy.stats import norm
 from sklearn.preprocessing import normalize
 import random
 
-def animate(true_states, belief_states, markers):
-    x_tr, y_tr, th_tr = true_states
-    x_guess, y_guess = belief_states
-    
-    radius = .5
-    yellow = (1,1,0)
-    black = 'k'
-    world_bounds = [-10,10]
-    
-    fig = plt.figure()
-    ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
-    ax.set_aspect('equal')
-    ax.plot(markers[0], markers[1], '+', color=black)
-    actual_path, = ax.plot([], [], color='b', zorder=-2, label="Actual")
-    pred_path, = ax.plot([], [], color='r', zorder=-1, label="Predicted")
-    heading, = ax.plot([], [], color=black)
-    robot = plt.Circle((x_tr[0],y_tr[0]), radius=radius, color=yellow, ec=black)
-    ax.add_artist(robot)
-    ax.legend()
-
-    def init():
-        actual_path.set_data([], [])
-        pred_path.set_data([], [])
-        heading.set_data([], [])
-        return actual_path, pred_path, heading, robot
-
-    def animate(i):
-        actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
-        pred_path.set_data(x_guess[:i+1], y_guess[:i+1])
-        heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
-            [y_tr[i], y_tr[i] + radius*sin(th_tr[i])])
-        robot.center = (x_tr[i],y_tr[i])
-        return actual_path, pred_path, heading, robot
-
-    anim = animation.FuncAnimation(fig, animate, init_func=init,
-        frames=len(x_tr), interval=20, blit=True, repeat=False)
-    
-    plt.pause(.1)
-    input("<Hit enter to close>")
+radius = .5
+black = 'k'
 
 def get_fwd_propogation(vel, om, th, delta_t):
     move_forward = np.zeros((3,1))
@@ -115,19 +78,63 @@ def low_variance_sampler(chi):
             i += 1
             c += chi[-1,i]
         new_particles[:,m] = chi[:-1,i]
-        
+
     return new_particles
 
+def plot_robot(center, heading):
+    yellow = (1,1,0)
+
+    x = center[0]
+    y = center[1]
+
+    robot = plt.Circle((x,y), radius=radius, color=yellow, ec=black)
+    plt.plot([x, x + radius*cos(heading)], 
+            [y, y + radius*sin(heading)], color=black)
+    axes = plt.gca()
+    axes.add_patch(robot)
+
+def set_graph_bounds(particle_positions, true_position, equal_aspect=True):
+    x = true_position[0]
+    y = true_position[1]
+
+    padding = .1
+    max_x_particle = np.max(particle_positions[0,:]) + padding
+    min_x_particle = np.min(particle_positions[0,:]) - padding
+    max_y_particle = np.max(particle_positions[1,:]) + padding
+    min_y_particle = np.min(particle_positions[1,:]) - padding
+
+    padding = 1.5 * radius
+    max_x_graph = max(max_x_particle, x + padding)
+    min_x_graph = min(min_x_particle, x - padding)
+    max_y_graph = max(max_y_particle, y + padding)
+    min_y_graph = min(min_y_particle, y - padding)
+
+    axes = plt.gca()
+    axes.set_xlim([min_x_graph,max_x_graph])
+    axes.set_ylim([min_y_graph,max_y_graph])
+
+    if equal_aspect:
+        axes.set_aspect('equal')
+
+def save_belief(bel_x, bel_y, bel_theta, mcl_particles):
+    bel_x.append( np.mean(mcl_particles[0,:]) )
+    bel_y.append( np.mean(mcl_particles[1,:]) )
+    bel_theta.append( np.mean(mcl_particles[2,:]) )
+
+def save_uncertainty(sig_x, sig_y, sig_theta, mcl_particles):
+    # 95% confidence interval, so multiply std dev by 2
+    sig_x.append( np.std(particles[0,:]) * 2 )
+    sig_y.append( np.std(particles[1,:]) * 2 )
+    sig_theta.append( np.std(particles[2,:]) * 2 )
+
+def bound_covariance_graph():
+    axes = plt.gca()
+    axes.set_ylim([-1,1])
 
 if __name__ == "__main__":
     dt = .1
     t = np.arange(0, 20+dt, dt)
     t = np.reshape(t, (1,-1))
-
-    # belief (estimates from EKF)
-    mu_x = np.zeros(t.shape)
-    mu_y = np.zeros(t.shape)
-    mu_theta = np.zeros(t.shape)   # radians
 
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
@@ -144,21 +151,12 @@ if __name__ == "__main__":
     # std deviation of range and bearing sensor noise for each landmark
     std_dev_range = .1
     std_dev_bearing = .05
-    # starting belief - initial condition (robot pose)
-    mu_x[0 , 0] = -5 + .5
-    mu_y[0 , 0] = -3 - .7
-    mu_theta[0 , 0] = (np.pi / 2) - .05
-    # initial uncertainty in the belief
-    sigma = np.array([
-                        [1, 0, 0],  # x
-                        [0, 1, 0],  # y
-                        [0, 0, .1]  # theta
-                    ])
+    # particles for MCL
     num_particles = 1000
     ########################################################################################
     ########################################################################################
 
-    # put None as first parameter so that indexing matches alpha name
+    # (put None as first parameter so that indexing matches alpha name)
     all_alphas = (None, alpha_1, alpha_2, alpha_3, alpha_4, alpha_5, alpha_6)
 
     measurement_std_devs = (std_dev_range, std_dev_bearing)
@@ -177,13 +175,7 @@ if __name__ == "__main__":
     velocity = v_c + randn(scale=np.sqrt( (alpha_1*(v_c**2)) + (alpha_2*(om_c**2)) ))
     omega = om_c + randn(scale=np.sqrt( (alpha_3*(v_c**2)) + (alpha_4*(om_c**2)) ))
 
-    # uncertainty due to measurement noise
-    Q_t = np.array([
-                    [(std_dev_range * std_dev_range), 0],
-                    [0, (std_dev_bearing * std_dev_bearing)]
-                    ])
-
-    # ground truth
+    # ground truth states
     x_pos_true = np.zeros(t.shape)
     y_pos_true = np.zeros(t.shape)
     theta_true = np.zeros(t.shape)  # radians
@@ -238,24 +230,29 @@ if __name__ == "__main__":
     particles = np.zeros((3,num_particles))
     particles[0:2,:] = np.random.uniform(-10, 10, size=(2,num_particles))
     particles[-1,:] = np.random.uniform(-np.pi, np.pi, size=(1,num_particles))
+
+    # starting belief - initial condition (robot pose)
+    mu_x = []
+    mu_y = []
+    mu_theta = []
+    save_belief(mu_x, mu_y, mu_theta, particles)
     
     # needed for plotting covariance bounds vs values
-    bound_x = [np.sqrt(sigma[0 , 0]) * 2]
-    bound_y = [np.sqrt(sigma[1 , 1]) * 2]
-    bound_theta = [np.sqrt(sigma[2 , 2]) * 2]
-    '''
-    # needed for plotting kalman gains
-    K_t = None # the kalman gain matrix that gets updated with measurements
-    k_r_x = []
-    k_r_y = []
-    k_r_theta = []
-    k_b_x = []
-    k_b_y = []
-    k_b_theta = []
-    '''
+    bound_x = []
+    bound_y = []
+    bound_theta = []
+    save_uncertainty(bound_x, bound_y, bound_theta, particles)
 
-    # TODO run mcl here
+    print("Running MCL...")
+    wait_time = .00001
+    p1 = plt.figure(1)
+    plt.plot(particles[0,:], particles[1,:], '.')
+    plot_robot( (x_pos_true[0,0],y_pos_true[0,0]) , theta_true[0,0] )
+    axes = plt.gca()
+    axes.set_aspect('equal')
+    plt.pause(wait_time)
     for t_step in range(1,t.size):
+        print("at time %.1f (s)" % (t[0,t_step]))
         # next state/evolution of particles
         # extra row for chi_bar_t is the weight of each particle
         chi_bar_t = np.zeros((particles.shape[0]+1,particles.shape[1]))
@@ -271,11 +268,13 @@ if __name__ == "__main__":
 
             state = np.reshape(particles[:,i], (-1,1))
             
+            # motion model
             next_state = sample_motion_model(u_t, state, all_alphas, dt)
             chi_bar_t[0,i] = next_state[0,0]
             chi_bar_t[1,i] = next_state[1,0]
             chi_bar_t[2,i] = next_state[2,0]
 
+            # measurement model
             weight = 1
             for m in range(len(lm_x)):
                 z_t = z_true[m][t_step]
@@ -284,36 +283,44 @@ if __name__ == "__main__":
 
         # normalize weights
         chi_bar_t[-1,:] /= np.sum(chi_bar_t[-1,:])
-        # print(np.sum(chi_bar_t[-1,:]), np.amin(chi_bar_t[-1,:]), np.amax(chi_bar_t[-1,:]))
-        
-        plt.subplot(121)
-        plt.plot(particles[0,:], particles[1,:], '.')
-        plt.title("before")
 
+        # resample, factoring in the weights
         particles = low_variance_sampler(chi_bar_t)
-        
-        plt.subplot(122)
-        plt.plot(particles[0,:], particles[1,:], '.')
-        plt.title("after")
-        plt.show()
-        break
 
-    '''
+        save_belief(mu_x, mu_y, mu_theta, particles)
+        save_uncertainty(bound_x, bound_y, bound_theta, particles)
+
+        plt.clf()
+        plt.plot(particles[0,:], particles[1,:], '.')
+        plot_robot( (x_pos_true[0,t_step],y_pos_true[0,t_step]) , theta_true[0,t_step] )
+        set_graph_bounds( particles[0:2,:], (x_pos_true[0,t_step], y_pos_true[0,t_step]) )
+        plt.pause(wait_time)
+
+    # draw the real path that the robot took in comparison to the predicted path
+    plt.clf()
+    plt.plot(x_pos_true[0,:],y_pos_true[0,:], label="truth")
+    plt.plot(mu_x, mu_y, label="predicted")
+    plot_robot( (x_pos_true[0,-1],y_pos_true[0,-1]) , theta_true[0,-1] )
+    plt.plot(lm_x, lm_y, '+', color=black)
+    axes = plt.gca()
+    axes.set_xlim([-10,10])
+    axes.set_ylim([-10,10])
+    axes.set_aspect('equal')
+    plt.legend()
+    plt.draw()
+
     # make everything a list (easier for plotting)
     x_pos_true = x_pos_true.tolist()[0]
     y_pos_true = y_pos_true.tolist()[0]
     theta_true = theta_true.tolist()[0]
-    mu_x = mu_x.tolist()[0]
-    mu_y = mu_y.tolist()[0]
-    mu_theta = mu_theta.tolist()[0]
     t = t.tolist()[0]
 
     ###############################################################################
     ###############################################################################
-    # show plots and animation
+    # show plots
 
     # plot the states over time
-    p1 = plt.figure(1)
+    p2 = plt.figure(2)
     plt.subplot(311)
     plt.plot(t, x_pos_true, label="true")
     plt.plot(t, mu_x, label="predicted")
@@ -331,41 +338,30 @@ if __name__ == "__main__":
     plt.draw()
 
     # plot the uncertainty in states over time
-    p2 = plt.figure(2)
+    p3 = plt.figure(3)
     plt.subplot(311)
     plt.plot(t, np.array(x_pos_true) - np.array(mu_x), color='b', label="error")
     plt.plot(t, bound_x, color='r', label="uncertainty")
     plt.plot(t, [x * -1 for x in bound_x], color='r')
     plt.ylabel("x position (m)")
     plt.legend()
+    bound_covariance_graph()
     plt.subplot(312)
     plt.plot(t, np.array(y_pos_true) - np.array(mu_y), color='b')
     plt.plot(t, bound_y, color='r')
     plt.plot(t, [x * -1 for x in bound_y], color='r')
     plt.ylabel("y position (m)")
+    bound_covariance_graph()
     plt.subplot(313)
     plt.plot(t, np.array(theta_true) - np.array(mu_theta), color='b')
     plt.plot(t, bound_theta, color='r')
     plt.plot(t, [x * -1 for x in bound_theta], color='r')
     plt.ylabel("heading (rad)")
     plt.xlabel("time (s)")
+    bound_covariance_graph()
     plt.draw()
 
-    # plot the kalman gains
-    p3 = plt.figure(3)
-    plt.plot(t[1:], k_r_x, label="Range: x position")
-    plt.plot(t[1:], k_r_y, label="Range: y position")
-    plt.plot(t[1:], k_r_theta, label="Range: theta")
-    plt.plot(t[1:], k_b_x, label="Bearing: x position")
-    plt.plot(t[1:], k_b_y, label="Bearing: y position")
-    plt.plot(t[1:], k_b_theta, label="Bearing: theta")
-    plt.title("Kalman gains")
-    plt.ylabel("Gain")
-    plt.xlabel("time (s)")
-    plt.legend()
-    plt.draw()
-
-    animate((x_pos_true, y_pos_true, theta_true), (mu_x, mu_y), (lm_x, lm_y))
+    plt.pause(.1)
+    input("<Hit enter to close>")
     ###############################################################################
     ###############################################################################
-    '''

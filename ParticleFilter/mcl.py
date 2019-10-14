@@ -151,10 +151,11 @@ if __name__ == "__main__":
     # std deviation of range and bearing sensor noise for each landmark
     std_dev_range = .1
     std_dev_bearing = .05
+    ########################################################################################
+    ########################################################################################
+
     # particles for MCL
-    num_particles = 1000
-    ########################################################################################
-    ########################################################################################
+    num_particles = int(input("Number of particles: "))
 
     # (put None as first parameter so that indexing matches alpha name)
     all_alphas = (None, alpha_1, alpha_2, alpha_3, alpha_4, alpha_5, alpha_6)

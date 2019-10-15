@@ -68,6 +68,8 @@ def low_variance_sampler(chi):
     # don't need the weights on the new particles
     new_particles = np.zeros( (chi.shape[0]-1,chi.shape[1]) )
 
+    saved_particle_indices = []
+
     M = chi.shape[1]
     r = random.uniform(0, 1/M)
     c = chi[-1,0]   # the first weight
@@ -78,6 +80,14 @@ def low_variance_sampler(chi):
             i += 1
             c += chi[-1,i]
         new_particles[:,m] = chi[:-1,i]
+        saved_particle_indices.append(i)
+
+    # dealing with particle deprivation (not in the original algorithm)
+    P = np.cov(chi[:-1,:])
+    uniq = np.unique(saved_particle_indices).size   # num. of unique particles in resampling
+    if (uniq/M) < .025:   # if we don't have much variety in our resampling
+        Q = P / ((M*uniq) ** (1/new_particles.shape[0]))
+        new_particles += mm(Q, randn(size=new_particles.shape))
 
     return new_particles
 

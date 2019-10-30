@@ -55,9 +55,6 @@ def propogate(vel, angular_vel, old_state, delta_t):
                             [vel * sin(theta) * delta_t],
                             [angular_vel * delta_t]
                         ])
-    # next_state = old_state + motion_vec
-    # next_state[2,0] = wrap(next_state[2,0])
-    # return next_state
     return old_state + motion_vec
 
 def wrap(angle):
@@ -128,6 +125,11 @@ if __name__ == "__main__":
                     [ 0,         var_bearing ]
                 ])
 
+    # information vector information
+    info_x = [info_vector[0,0]]
+    info_y = [info_vector[1,0]]
+    info_th = [info_vector[2,0]]
+
     for i in range(1,t.size):
         prev_state = mm(mat_inv(info_matrix), info_vector)
         theta = prev_state[2,0]
@@ -156,8 +158,7 @@ if __name__ == "__main__":
         bar_info_vector = mm(bar_info_matrix, mu_bar)
 
         for j in range(num_landmarks):
-            if (j == 4):
-                break
+        # for j in range(1):
             m_j_x = lm_x[j]
             m_j_y = lm_y[j]
             bel_x = mu_bar[0 , 0]
@@ -170,7 +171,7 @@ if __name__ == "__main__":
             q = (diff_x ** 2) + (diff_y ** 2)
             z_hat = np.array([
                                 [np.sqrt(q)],
-                                [wrap(arctan2(diff_y, diff_x) - bel_theta)]
+                                [arctan2(diff_y, diff_x) - bel_theta]
                             ])
             H_t = np.array([
                             [-diff_x / np.sqrt(q), -diff_y / np.sqrt(q), 0],
@@ -184,7 +185,9 @@ if __name__ == "__main__":
                             [ range_tr[i,j] ],
                             [ bearing_tr[i,j] ]
                             ])
-            a = (z_t - z_hat) + mm(H_t, mu_bar)
+            z_diff = z_t - z_hat
+            z_diff[1,0] = wrap(z_diff[1,0]) # wrapping here is IMPORTANT!!!
+            a = z_diff + + mm(H_t, mu_bar)
             b = mm(np.transpose(H_t), mat_inv(Q_t))
             bar_info_vector += mm(b, a)
             
@@ -202,6 +205,9 @@ if __name__ == "__main__":
         bound_x.append(np.sqrt(sigma[0 , 0]) * 2)
         bound_y.append(np.sqrt(sigma[1 , 1]) * 2)
         bound_theta.append(np.sqrt(sigma[2 , 2]) * 2)
+        info_x.append(info_vector[0,0])
+        info_y.append(info_vector[1,0])
+        info_th.append(info_vector[2,0])
 
     # plot the states over time
     p1 = plt.figure(1)
@@ -240,6 +246,16 @@ if __name__ == "__main__":
     plt.plot(t, [x * -1 for x in bound_theta], color='r')
     plt.ylabel("heading (rad)")
     plt.xlabel("time (s)")
+    plt.draw()
+
+    # plot information vector values
+    p3 = plt.figure(3)
+    plt.plot(t, info_x, label="x")
+    plt.plot(t, info_y, label="y")
+    plt.plot(t, info_th, label="theta")
+    plt.xlabel("time (s)")
+    plt.title("Information Vector Values")
+    plt.legend()
     plt.draw()
 
     animate( (X_tr[0,:], X_tr[1,:], X_tr[2,:]) , (x_pred, y_pred) , (lm_x, lm_y) )

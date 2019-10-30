@@ -11,7 +11,7 @@ if __name__ == "__main__":
     p_free = 1 - p_occ
 
     alpha = 1.0 # meters
-    beta = np.deg2rad(5)
+    beta = np.deg2rad(2)
     z_max = 150 # meters
 
     # initially, we know nothing about each cell, so p(m_i) = .5, which means
@@ -30,84 +30,18 @@ if __name__ == "__main__":
     th_k = mat_file['thk']
     states = mat_file['X']
     z = mat_file['z']
+    z = np.nan_to_num(z)    # make NaN 0
 
     times = [i for i in range(states.shape[1])]
 
     # subtract 1 from pose loaction coords b/c python is 0-based indexing and matlab is 1-based
     states[0,:] -= 1
     states[1,:] -= 1
-    # make the origin of the world be in the bottom left corner
-    # states[1,:] = (world.shape[0] - 1) - states[1,:]
-
-    '''
-    # TODO see if this is necessary ... maybe just make the range 500 (something large)
-    # make NaN ranges infinity
-    z[0,:,:] = np.where(np.isnan(z[0,:,:]), np.inf, z[0,:,:])
-    # make NaN angles the regular angle
-    for t in times:
-        z[1,:,t] = th_k[0,:]
-    '''
-
-    '''
-    for t in times:
-        t=61
-        x = states[0,t]
-        y = states[1,t]
-        orientation = states[2,t]
-        print("x:", x)
-        print("y:", y)
-        print("th:", orientation)
-
-        r = z[0,0,t]
-        th = orientation + z[1,0,t]
-        print("\nmeasurement at", th, "radians")
-        print("r:", r)
-        print("new x:", x + ( np.cos(th) * r) )
-        print("new y:", y - ( np.sin(th) * r) )
-
-        r = z[0,5,t]
-        th = orientation + z[1,5,t]
-        print("\nmeasurement at", th, "radians")
-        print("r:", r)
-        print("new x:", x + ( np.cos(th) * r) )
-        print("new y:", y - ( np.sin(th) * r) )
-
-        r = z[0,-1,t]
-        th = orientation + z[1,-1,t]
-        print("\nmeasurement at", th, "radians")
-        print("r:", r)
-        print("new x:", x + ( np.cos(th) * r) )
-        print("new y:", y - ( np.sin(th) * r) )
-
-        unit_vec = ( x + np.cos(orientation) , y - np.sin(orientation) )
-        print("\nunit vector in the direction of orientation:")
-        print(unit_vec)
-
-        break
-    '''
-
-    '''
-    fig = plt.figure()
-    ax = plt.gca()
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ims = []
-    for t in times:
-        if t > 5:
-            break
-        x = int(states[0,t])
-        y = int(states[1,t])
-        world[y,x] = 1
-        im = plt.imshow(world, cmap='gray')
-        ims.append([im])
-    ani = animation.ArtistAnimation(fig, ims, interval=20, blit=True,
-                                    repeat=False) 
-    plt.pause(.1)
-    input("<Hit enter to close>")
-    '''
 
     min_perception_bound = np.amin(th_k)
     max_perception_bound = np.amax(th_k)
+
+    mapped_world = None
 
     loop = tqdm(total=len(times), position=0)
     
@@ -135,35 +69,45 @@ if __name__ == "__main__":
 
                 # inverse range sensor model
                 r = np.sqrt( (x_diff * x_diff) + (y_diff * y_diff) )
-                k = np.argmin( np.abs(bearing - th_k) )
+                k = np.argmin( np.abs(bearing - z[1,:,t]) )
                 z_k_t = z[0,k,t]
-                th_k_sens = th_k[0,k]
+                th_k_sens = z[1,k,t]
                 update_amt = l_0
                 if ( r > min(z_max, z_k_t + (alpha/2)) ) or ( np.abs(bearing - th_k_sens) > (beta/2) ):
                     update_amt = l_0
-                elif (z_k_t < z_max) and ( np.abs(bearing - th_k_sens) > (beta/2) ):
+                # elif (z_k_t < z_max) and ( np.abs(bearing - th_k_sens) > (beta/2) ):
+                elif (z_k_t < z_max) and ( np.abs(r - z_k_t) > (alpha/2) ):
                     update_amt = l_occ
                 elif r <= z_k_t:
                     update_amt = l_free
 
                 world[y,x] += update_amt - l_0
 
-        # show where the robot is
-        x_idx, y_idx = int(states[0,t]), int(states[1,t])
-        temp = world[y_idx, x_idx]
-        world[y_idx, x_idx] = np.amin(world)
-
         # animate
-        # (flipud makes the world origin start from bottom left instead of top left)
-        im = plt.imshow(np.flipud(world * -1), cmap='gray')
+        # make origin of world at bottom left, not top left
+        proper_orientation = np.flipud(world)
+        # convert from log odds to regular probability (between 0 and 1)
+        e_l = np.exp(proper_orientation)
+        reg_probability = e_l / (1 + e_l)
+        # show where robot is
+        x_idx, y_idx = int(states[0,t]), int(states[1,t])
+        y_idx = world.shape[0] - 1 - y_idx # have to index from bottom now, not top
+        temp = reg_probability[y_idx, x_idx]
+        reg_probability[y_idx, x_idx] = 0
+        # save world image to animation stack
+        im = plt.imshow(reg_probability, cmap='gray')
         ims.append([im])
-
-        # reset robot cell to original
-        world[y_idx, x_idx] = temp
+        # save image to file later (remove robot from saved map)
+        reg_probability[y_idx, x_idx] = temp
+        mapped_world = reg_probability
 
         loop.update(1)
+    loop.close()
 
     ani = animation.ArtistAnimation(fig, ims, interval=20, blit=True,
                                     repeat=False) 
     plt.pause(.1)
     input("<Hit enter to close>")
+
+    # save the world that was mapped (the last image on the animation stack)
+    np.save("./final_world", mapped_world)

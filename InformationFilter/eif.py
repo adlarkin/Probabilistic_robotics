@@ -130,6 +130,7 @@ if __name__ == "__main__":
     info_y = [info_vector[1,0]]
     info_th = [info_vector[2,0]]
 
+    ''' run EIF '''
     for i in range(1,t.size):
         prev_state = mm(mat_inv(info_matrix), info_vector)
         theta = prev_state[2,0]
@@ -156,7 +157,7 @@ if __name__ == "__main__":
         mu_bar = propogate(v_c[i], om_c[i], prev_state, dt)
         
         bar_info_vector = mm(bar_info_matrix, mu_bar)
-
+        
         for j in range(num_landmarks):
         # for j in range(1):
             m_j_x = lm_x[j]
@@ -208,6 +209,8 @@ if __name__ == "__main__":
         info_x.append(info_vector[0,0])
         info_y.append(info_vector[1,0])
         info_th.append(info_vector[2,0])
+
+    ''' algorithm is done; plotting and animating results '''
 
     # plot the states over time
     p1 = plt.figure(1)

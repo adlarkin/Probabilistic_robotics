@@ -9,13 +9,13 @@ from numpy.random import normal as randn
 from matplotlib import animation
 from matplotlib.patches import Ellipse
 
-def animate(true_states, belief_states, markers):
+def animate(true_states, belief_states, markers, uncertanties):
     x_tr, y_tr, th_tr = true_states
     
     radius = .5
     yellow = (1,1,0)
     black = 'k'
-    world_bounds = [-20,20]
+    world_bounds = [-15,20]
     
     fig = plt.figure()
     ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
@@ -27,20 +27,12 @@ def animate(true_states, belief_states, markers):
     heading, = ax.plot([], [], color=black)
     robot = plt.Circle((x_tr[0],y_tr[0]), radius=radius, color=yellow, ec=black)
     ax.add_artist(robot)
-    '''
     lm_uncertanties = []
     for i in range(len(markers[0])):
-        lm_idx = 3 + (2*i)
-        x_lm = belief_states[lm_idx,0]
-        y_lm = belief_states[lm_idx+1,0]
-        x_uncertainty = uncertanties[lm_idx, lm_idx, 0]
-        x_uncertainty = np.sqrt(x_uncertainty) * 2
-        y_uncertainty = uncertanties[lm_idx+1, lm_idx+1, 0]
-        y_uncertainty = np.sqrt(y_uncertainty) * 2
-        next_lm_unceratinty = Ellipse((x_lm,y_lm), x_uncertainty, y_uncertainty)
+        next_lm_unceratinty = Ellipse((0,0), 0, 0, color='g')
         ax.add_artist(next_lm_unceratinty)
+        next_lm_unceratinty.set_alpha(.25)
         lm_uncertanties.append(next_lm_unceratinty)
-    '''
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
     def init():
@@ -48,20 +40,35 @@ def animate(true_states, belief_states, markers):
         actual_path.set_data([], [])
         pred_path.set_data([], [])
         heading.set_data([], [])
-        return pred_markers, actual_path, pred_path, heading, robot
+        return (pred_markers, actual_path, pred_path, heading, robot) \
+            + tuple(lm_uncertanties)
 
     def animate(i):
+        for j in range(len(lm_uncertanties)):
+            lm_idx = 3 + (2*j)
+            x_lm = belief_states[lm_idx,i]
+            y_lm = belief_states[lm_idx+1,i]
+            if (x_lm == 0) and (y_lm == 0):
+                # haven't seen landmark yet
+                continue
+            # multiply each uncertainty by 2 because this is the TOTAL diameter
+            # (similar to doing plus or minus bounds on confidence interval)
+            x_uncertainty = (np.sqrt(uncertanties[lm_idx, lm_idx, i]) * 2) * 2
+            y_uncertainty = (np.sqrt(uncertanties[lm_idx+1, lm_idx+1, i]) * 2) * 2
+            lm_uncertanties[j].set_center((x_lm,y_lm))
+            lm_uncertanties[j].width = x_uncertainty
+            lm_uncertanties[j].height = y_uncertainty
         pred_markers.set_data(belief_states[3::2, i], belief_states[4::2, i])
-        
         actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
         pred_path.set_data(belief_states[0,:i+1], belief_states[1,:i+1])
         heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
             [y_tr[i], y_tr[i] + radius*sin(th_tr[i])])
         robot.center = (x_tr[i],y_tr[i])
-        return pred_markers, actual_path, pred_path, heading, robot
+        return (pred_markers, actual_path, pred_path, heading, robot) \
+            + tuple(lm_uncertanties)
 
     anim = animation.FuncAnimation(fig, animate, init_func=init,
-        frames=len(x_tr), interval=25, blit=True, repeat=False)
+        frames=len(x_tr), interval=30, blit=True, repeat=False)
     
     plt.pause(.1)
     input("<Hit enter to close>")
@@ -119,8 +126,8 @@ if __name__ == "__main__":
     np.random.seed(1)
     '''
     # landmarks (x and y coordinates)
-    lm_x = [15, -5, 1, 10, 0, -7]
-    lm_y = [15, -3, 5, -10, -9, 7]
+    lm_x = [15, -5, 1, 10, 0, -7, 15]
+    lm_y = [15, -3, 7, -10, -9, 7, 5]
     assert(len(lm_x) == len(lm_y))
     num_landmarks = len(lm_x)
 
@@ -212,8 +219,13 @@ if __name__ == "__main__":
         y_pos_true[0,timestep] = next_state[1,0]
         theta_true[0,timestep] = next_state[2,0]
 
-    combined_state_vecs = np.zeros((mu.shape[0],t.size)) # a record of the pose and world estimates at each timestep
+    # a record of the pose and world estimates at each timestep
+    combined_state_vecs = np.zeros((mu.shape[0],t.size))
     combined_state_vecs[:,0] = mu[:,0]
+
+    # a record of uncertainties over time
+    all_sigmas = np.zeros((sigma.shape[0], sigma.shape[1], t.size))
+    all_sigmas[:,:,0] = sigma
 
     # run EKF SLAM
     perception_bound = np.deg2rad(FOV / 2)
@@ -317,10 +329,11 @@ if __name__ == "__main__":
         print("time",i,"-",hit_lms)
         '''
 
-        # update belief and save it for later
+        # update belief/uncertainty and save it for later
         mu = mu_bar
         sigma = sigma_bar
         combined_state_vecs[:,i] = mu[:,0]
+        all_sigmas[:,:,i] = sigma
 
     # make things a list (easier for plotting)
     x_pos_true = x_pos_true.tolist()[0]
@@ -333,4 +346,4 @@ if __name__ == "__main__":
     # plt.imshow(sigma)
     # plt.draw()
 
-    animate((x_pos_true, y_pos_true, theta_true), combined_state_vecs, (lm_x, lm_y))
+    animate((x_pos_true, y_pos_true, theta_true), combined_state_vecs, (lm_x, lm_y), all_sigmas)

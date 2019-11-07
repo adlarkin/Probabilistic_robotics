@@ -10,6 +10,8 @@ from matplotlib import animation
 from matplotlib.patches import Ellipse, Wedge
 from numpy.linalg import eig
 
+# can look at patch collection for a cleaner, more efficient solution
+# https://stackoverflow.com/questions/45969740/python-matplotlib-patchcollection-animation-doesnt-update
 def animate(true_states, belief_states, markers, uncertanties, fov):
     x_tr, y_tr, th_tr = true_states
     fov_bound = np.deg2rad(fov)/2

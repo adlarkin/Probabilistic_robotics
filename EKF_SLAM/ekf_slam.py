@@ -10,6 +10,8 @@ from matplotlib import animation
 from matplotlib.patches import Ellipse, Wedge
 from numpy.linalg import eig
 
+world_bounds = [-15,20]
+
 # can look at patch collection for a cleaner, more efficient solution
 # https://stackoverflow.com/questions/45969740/python-matplotlib-patchcollection-animation-doesnt-update
 def animate(true_states, belief_states, markers, uncertanties, fov):
@@ -19,7 +21,6 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
     radius = .5
     yellow = (1,1,0)
     black = 'k'
-    world_bounds = [-15,20]
     
     fig = plt.figure()
     ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
@@ -58,15 +59,6 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
             if (x_lm == 0) and (y_lm == 0):
                 # haven't seen landmark yet
                 continue
-            '''
-            # multiply each uncertainty by 2 because this is the TOTAL diameter
-            # (similar to doing plus or minus bounds on confidence interval)
-            x_uncertainty = (np.sqrt(uncertanties[lm_idx, lm_idx, i]) * 2) * 2
-            y_uncertainty = (np.sqrt(uncertanties[lm_idx+1, lm_idx+1, i]) * 2) * 2
-            lm_uncertanties[j].set_center((x_lm,y_lm))
-            lm_uncertanties[j].width = x_uncertainty
-            lm_uncertanties[j].height = y_uncertainty
-            '''
             # https://www.visiondummy.com/2014/04/draw-error-ellipse-representing-covariance-matrix/
             w, v = eig(uncertanties[lm_idx:lm_idx+2, lm_idx:lm_idx+2, i])
             lm_uncertanties[j].set_center((x_lm,y_lm))
@@ -144,10 +136,17 @@ if __name__ == "__main__":
     np.random.seed(1)
     '''
     # landmarks (x and y coordinates)
+    '''
     lm_x = [15, -5, 1, 10, 0, -7, 15]
     lm_y = [15, -3, 7, -10, -9, 7, 5]
     assert(len(lm_x) == len(lm_y))
     num_landmarks = len(lm_x)
+    '''
+    num_landmarks = 10
+    world_markers = np.random.randint(low=world_bounds[0]+1, 
+        high=world_bounds[1], size=(2,num_landmarks))
+    lm_x = world_markers[0,:]
+    lm_y = world_markers[1,:]
 
     seen_landmark = {}
     for i in range(num_landmarks):
@@ -182,7 +181,7 @@ if __name__ == "__main__":
     mu[2 , 0] = np.pi / 2
     # initial uncertainty in the poses and map (landmark locations)
     # low uncertainty in initial pose, but high uncertainty in initial landmark locations
-    sigma = np.identity(pose_map_size) * 100
+    sigma = np.identity(pose_map_size) * 5000
     sigma[0,0] = 0
     sigma[1,1] = 0
     sigma[2,2] = 0

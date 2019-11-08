@@ -26,7 +26,6 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
     ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
     ax.set_aspect('equal')
     ax.plot(markers[0], markers[1], '+', color=black, zorder=-2, label="True Landmarks")
-    pred_markers, = ax.plot([], [], '.', color='g', zorder=-1, label="Predicted Landmarks")
     actual_path, = ax.plot([], [], color='b', zorder=-2, label="True Path")
     pred_path, = ax.plot([], [], color='r', zorder=-1, label="Predicted Path")
     heading, = ax.plot([], [], color=black)
@@ -34,9 +33,7 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
     ax.add_artist(robot)
     lm_uncertanties = []
     for i in range(len(markers[0])):
-        next_lm_unceratinty = Ellipse((0,0), 0, 0, color='g')
-        ax.add_artist(next_lm_unceratinty)
-        next_lm_unceratinty.set_alpha(.20)
+        next_lm_unceratinty, = ax.plot([], [], color='g')
         lm_uncertanties.append(next_lm_unceratinty)
     vision_beam = Wedge((x_tr[0],y_tr[0]), 1000, np.rad2deg(th_tr[0] - fov_bound), 
         np.rad2deg(th_tr[0] + fov_bound), zorder=-5, alpha=.1, color='m')
@@ -44,11 +41,10 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
     def init():
-        pred_markers.set_data([], [])
         actual_path.set_data([], [])
         pred_path.set_data([], [])
         heading.set_data([], [])
-        return (pred_markers, actual_path, pred_path, heading, robot, vision_beam) \
+        return (actual_path, pred_path, heading, robot, vision_beam) \
             + tuple(lm_uncertanties)
 
     def animate(i):
@@ -59,13 +55,15 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
             if (x_lm == 0) and (y_lm == 0):
                 # haven't seen landmark yet
                 continue
-            # https://www.visiondummy.com/2014/04/draw-error-ellipse-representing-covariance-matrix/
-            w, v = eig(uncertanties[lm_idx:lm_idx+2, lm_idx:lm_idx+2, i])
-            lm_uncertanties[j].set_center((x_lm,y_lm))
-            lm_uncertanties[j].width = 2 * np.sqrt(5.991 * w[0])
-            lm_uncertanties[j].height = 2 * np.sqrt(5.991 * w[1])
-            lm_uncertanties[j].angle = np.rad2deg(arctan2(v[1,np.argmax(w)], v[0,np.argmax(w)]))
-        pred_markers.set_data(belief_states[3::2, i], belief_states[4::2, i])
+            # http://anuncommonlab.com/articles/how-kalman-filters-work/part3.html#ellipses
+            U, S, _ = np.linalg.svd(uncertanties[lm_idx:lm_idx+2, lm_idx:lm_idx+2, i])
+            C = U * 2*np.sqrt(S)
+            theta = np.linspace(0, 2*np.pi, 100)
+            circle = np.array([cos(theta),sin(theta)])
+            e = mm(C, circle)
+            e[0,:] += x_lm
+            e[1,:] += y_lm
+            lm_uncertanties[j].set_data(e[0,:], e[1,:])
         actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
         pred_path.set_data(belief_states[0,:i+1], belief_states[1,:i+1])
         heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
@@ -74,7 +72,7 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
         vision_beam.set_center((x_tr[i],y_tr[i]))
         vision_beam.theta1 = np.rad2deg(th_tr[i] - fov_bound)
         vision_beam.theta2 = np.rad2deg(th_tr[i] + fov_bound)
-        return (pred_markers, actual_path, pred_path, heading, robot, vision_beam) \
+        return (actual_path, pred_path, heading, robot, vision_beam) \
             + tuple(lm_uncertanties)
 
     anim = animation.FuncAnimation(fig, animate, init_func=init,
@@ -142,7 +140,7 @@ if __name__ == "__main__":
     assert(len(lm_x) == len(lm_y))
     num_landmarks = len(lm_x)
     '''
-    num_landmarks = 10
+    num_landmarks = 15
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))
     lm_x = world_markers[0,:]

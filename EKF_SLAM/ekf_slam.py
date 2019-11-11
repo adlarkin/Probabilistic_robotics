@@ -140,7 +140,7 @@ if __name__ == "__main__":
     assert(len(lm_x) == len(lm_y))
     num_landmarks = len(lm_x)
     '''
-    num_landmarks = 15
+    num_landmarks = 20
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))
     lm_x = world_markers[0,:]
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     sigma[1,1] = 0
     sigma[2,2] = 0
     # sensor field of view (in degrees ... converted to radians later)
-    FOV = 45
+    FOV = 60
     ########################################################################################
     ########################################################################################
 
@@ -263,9 +263,6 @@ if __name__ == "__main__":
         real_x = x_pos_true[0 , i]
         real_y = y_pos_true[0 , i]
         real_theta = theta_true[0 , i]
-        '''
-        hit_lms = []
-        '''
         for j in range(num_landmarks):
             m_j_x = lm_x[j]
             m_j_y = lm_y[j]
@@ -287,9 +284,6 @@ if __name__ == "__main__":
             # make sure the landmark is in the field of view (bearing vs FOV)
             if np.abs(wrap(z_true[1,0])) > perception_bound:
                 continue
-            '''
-            hit_lms.append(j)
-            '''
 
             lm_idx = 3 + (2*j) # where we index the mu vector for the j'th landmark
 
@@ -340,9 +334,6 @@ if __name__ == "__main__":
             mu_bar = mu_bar + mm(K_t, z_diff)
             
             sigma_bar = mm((np.identity(sigma_bar.shape[0]) - mm(K_t, H_t)), sigma_bar)
-        '''
-        print("time",i,"-",hit_lms)
-        '''
 
         # update belief/uncertainty and save it for later
         mu = mu_bar
@@ -356,10 +347,12 @@ if __name__ == "__main__":
     theta_true = theta_true.tolist()[0]
     t = t.tolist()[0]
 
-    ''' show the final covariance matrix (optional) '''
-    # p1 = plt.figure(1)
-    # plt.imshow(sigma)
-    # plt.draw()
-
     animate((x_pos_true, y_pos_true, theta_true), combined_state_vecs, 
         (lm_x, lm_y), all_sigmas, FOV)
+
+    ''' show the final covariance matrix (optional) '''
+    # p2 = plt.figure(2)
+    # plt.imshow(sigma)
+    # plt.draw()
+    # plt.pause(.1)
+    # input("<Hit enter to close>")

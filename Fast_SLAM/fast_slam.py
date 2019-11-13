@@ -20,11 +20,16 @@ world_bounds = [-15,20]
 # can look at patch collection for a cleaner, more efficient solution
 # https://stackoverflow.com/questions/45969740/python-matplotlib-patchcollection-animation-doesnt-update
 # def animate(true_states, belief_states, markers, uncertanties, fov):
-def animate(true_states, pose_particles, markers):
+def animate(true_states, pose_particles, markers, lm_pred_uncertainty, 
+    lm_pred_locs, fov):
     mu_x = [np.mean(pose_particles[0,:,i]) for i in range(pose_particles.shape[2])]
     mu_y = [np.mean(pose_particles[1,:,i]) for i in range(pose_particles.shape[2])]
     
     x_tr, y_tr, th_tr = true_states
+    fov_bound = np.deg2rad(fov)/2
+
+    lm_pred_x = lm_pred_locs[0]
+    lm_pred_y = lm_pred_locs[1]
     
     radius = .5
     yellow = (1,1,0)
@@ -34,12 +39,19 @@ def animate(true_states, pose_particles, markers):
     ax = plt.axes(xlim=world_bounds, ylim=world_bounds)
     ax.set_aspect('equal')
     ax.plot(markers[0], markers[1], '+', color=black, zorder=-2, label="True Landmarks")
-    actual_path, = ax.plot([], [], color='b', zorder=-2, label="True Path")
-    pred_path, = ax.plot([], [], color='r', zorder=-1, label="Predicted Path")
+    actual_path, = ax.plot([], [], '--', color='b', alpha=.35, zorder=-2, label="True Path")
+    pred_path, = ax.plot([], [], color='g', zorder=-1, label="Predicted Path")
     heading, = ax.plot([], [], color=black)
-    particles, = ax.plot([], [], '.', color='c') # cyan
+    particles, = ax.plot([], [], '.', color='b')
     robot = plt.Circle((x_tr[0],y_tr[0]), radius=radius, color=yellow, ec=black)
     ax.add_artist(robot)
+    lm_uncertanties = []
+    for i in range(len(markers[0])):
+        next_lm_unceratinty, = ax.plot([], [], color='r')
+        lm_uncertanties.append(next_lm_unceratinty)
+    vision_beam = Wedge((x_tr[0],y_tr[0]), 1000, np.rad2deg(th_tr[0] - fov_bound), 
+        np.rad2deg(th_tr[0] + fov_bound), zorder=-5, alpha=.1, color='m')
+    ax.add_artist(vision_beam)
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
     def init():
@@ -47,19 +59,40 @@ def animate(true_states, pose_particles, markers):
         pred_path.set_data([], [])
         heading.set_data([], [])
         particles.set_data([], [])
-        return actual_path, pred_path, heading, particles, robot
+        return (actual_path, pred_path, heading, particles, robot, vision_beam) \
+            + tuple(lm_uncertanties)
 
     def animate(i):
+        for j in range(len(lm_uncertanties)):
+            x_lm = lm_pred_x[j,i]
+            y_lm = lm_pred_y[j,i]
+            if (x_lm == 0) and (y_lm == 0):
+                # haven't seen landmark yet
+                continue
+            # http://anuncommonlab.com/articles/how-kalman-filters-work/part3.html#ellipses
+            sigma = lm_pred_uncertainty[j][:,:,i]
+            U, S, _ = np.linalg.svd(sigma)
+            C = U * 2*np.sqrt(S)
+            theta = np.linspace(0, 2*np.pi, 100)
+            circle = np.array([cos(theta),sin(theta)])
+            e = mm(C, circle)
+            e[0,:] += x_lm
+            e[1,:] += y_lm
+            lm_uncertanties[j].set_data(e[0,:], e[1,:])
         actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
         pred_path.set_data(mu_x[:i+1], mu_y[:i+1])
         heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
             [y_tr[i], y_tr[i] + radius*sin(th_tr[i])])
         particles.set_data(pose_particles[0,:,i], pose_particles[1,:,i])
         robot.center = (x_tr[i],y_tr[i])
-        return actual_path, pred_path, heading, particles, robot
+        vision_beam.set_center((x_tr[i],y_tr[i]))
+        vision_beam.theta1 = np.rad2deg(th_tr[i] - fov_bound)
+        vision_beam.theta2 = np.rad2deg(th_tr[i] + fov_bound)
+        return (actual_path, pred_path, heading, particles, robot, vision_beam) \
+            + tuple(lm_uncertanties)
 
     anim = animation.FuncAnimation(fig, animate, init_func=init,
-        frames=len(x_tr), interval=40, blit=True, repeat=False)
+        frames=len(x_tr), interval=60, blit=True, repeat=False)
     
     plt.pause(.1)
     input("<Hit enter to close>")
@@ -104,21 +137,13 @@ def wrap(angle):
     # map angle between -pi and pi
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
-def measurement_model(true_z, z_std_devs, predicted_state, marker_x, marker_y):
-    # z_std_devs = (std_dev_range, std_dev_bearing)
-    assert (len(z_std_devs) == 2)
-
-    z_hat = get_measurement(marker_x, marker_y, predicted_state[0,0],
-        predicted_state[1,0], predicted_state[2,0])
-
-    return norm.pdf(true_z[0,0] - z_hat[0,0], scale=z_std_devs[0]) * \
-        norm.pdf(wrap(true_z[1,0] - z_hat[1,0]), scale=z_std_devs[1])
-
-def low_variance_sampler(chi):
+def low_variance_sampler(chi, lm_x_locs, lm_y_locs, lm_sigmas):
     # don't need the weights on the new particles
     new_particles = np.zeros( (chi.shape[0]-1,chi.shape[1]) )
-
-    saved_particle_indices = []
+    
+    new_x_lm_locs = np.zeros(lm_x_locs.shape)
+    new_y_lm_locs = np.zeros(lm_y_locs.shape)
+    new_lm_sigmas = np.zeros(lm_sigmas.shape)
 
     M = chi.shape[1]
     r = random.uniform(0, 1/M)
@@ -130,16 +155,12 @@ def low_variance_sampler(chi):
             i += 1
             c += chi[-1,i]
         new_particles[:,m] = chi[:-1,i]
-        saved_particle_indices.append(i)
+        new_x_lm_locs[:,m] = lm_x_locs[:,i]
+        new_y_lm_locs[:,m] = lm_y_locs[:,i]
+        p_new, p_old = 2*m, 2*i
+        new_lm_sigmas[:,p_new:p_new+2] = lm_sigmas[:,p_old:p_old+2]
 
-    # dealing with particle deprivation (not in the original algorithm)
-    P = np.cov(chi[:-1,:])
-    uniq = np.unique(saved_particle_indices).size   # num. of unique particles in resampling
-    if (uniq/M) < .025:   # if we don't have much variety in our resampling
-        Q = P / ((M*uniq) ** (1/new_particles.shape[0]))
-        new_particles += mm(Q, randn(size=new_particles.shape))
-
-    return new_particles
+    return new_particles, new_x_lm_locs, new_y_lm_locs, new_lm_sigmas
 
 def get_avg_uncertainty(lm_uncertainty_matrix):
     avgs = []
@@ -153,24 +174,25 @@ def get_avg_uncertainty(lm_uncertainty_matrix):
 
 if __name__ == "__main__":
     dt = .1
-    t = np.arange(0, 20+dt, dt)
+    total_time = 75 # seconds
+    t = np.arange(0, total_time+dt, dt)
 
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
     np.random.seed(None)    # reproduce noise?
     # noise in the command velocities (translational and rotational)
-    alpha_1 = .1 / 2
-    alpha_2 = .01 / 2
-    alpha_3 = .01 / 2
-    alpha_4 = .1 / 2
-    alpha_5 = .01 / 2
-    alpha_6 = .01 / 2
+    alpha_1 = .1
+    alpha_2 = .01
+    alpha_3 = .01
+    alpha_4 = .1
+    alpha_5 = .01
+    alpha_6 = .01
     # std deviation of range and bearing sensor noise for each landmark
     std_dev_range = .1
     std_dev_bearing = .05
     # sensor field of view (in degrees)
-    FOV = 360
+    FOV = 90
     # number of landmarks
     num_landmarks = 10
     ########################################################################################
@@ -191,8 +213,6 @@ if __name__ == "__main__":
     # (put None as first parameter so that indexing matches alpha name)
     all_alphas = (None, alpha_1, alpha_2, alpha_3, alpha_4, alpha_5, alpha_6)
 
-    measurement_std_devs = (std_dev_range, std_dev_bearing)
-
     # landmarks (x and y coordinates)
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))
@@ -202,6 +222,7 @@ if __name__ == "__main__":
     # control inputs - noise free (NOT ground truth)
     v_c = 1 + (.5*cos(2*np.pi*.2*t))
     om_c = -.2 + (2*cos(2*np.pi*.6*t))
+    # om_c = -.2 + (1*cos(2*np.pi*.2*t))
 
     # ground truth inputs (with noise)
     velocity = v_c + randn(scale=np.sqrt( (alpha_1*(v_c**2)) + (alpha_2*(om_c**2)) ))
@@ -256,31 +277,14 @@ if __name__ == "__main__":
     particle_poses[2,:,0] = theta_true[0]
 
     # uncertanties for every landmark at a given time
-    '''
-    # start off with high landmark uncertainty
-    '''
     # (row idx is the landmark idx. column idx is the particle idx)
-    '''
-    initial_uncertainty = 5000
-    '''
     lm_uncertanties = np.zeros((2*num_landmarks,2*num_particles))
-    '''
-    for lm_idx in range(0,lm_uncertanties.shape[0],2):
-        for p_idx in range(0,lm_uncertanties.shape[1],2):
-            lm_uncertanties[lm_idx,p_idx] = initial_uncertainty
-            lm_uncertanties[lm_idx+1,p_idx+1] = initial_uncertainty
-    '''
 
     # uncertanties for every landmark over all times
     # (the average of all particle uncertanties for a landmark at a given time)
-    init_avgs = get_avg_uncertainty(lm_uncertanties)
     lm_uncertanty_history = {}
     for k in range(num_landmarks):
         lm_uncertanty_history[k] = np.zeros((2,2,t.size))
-        '''
-        # save the initial uncertanty in the history
-        lm_uncertanty_history[k][:,:,0] = init_avgs[k]
-        '''
 
     # landmark location estimates (current time)
     lm_loc_estimates_x = np.zeros((num_landmarks, num_particles))
@@ -293,7 +297,8 @@ if __name__ == "__main__":
     # seen landmarks for each particle
     seen_lm = np.zeros((num_landmarks, num_particles), dtype=bool)
 
-    loop = tqdm(total=t.size, position=0)
+    perception_bound = np.deg2rad(FOV / 2)
+    loop = tqdm(total=t.size-1, position=0)
     for t_step in range(1,t.size):
         # next state/evolution of particles
         # extra row for chi_bar_t is the weight of each particle
@@ -315,12 +320,19 @@ if __name__ == "__main__":
             chi_bar_t[1,k] = next_state[1,0]
             chi_bar_t[2,k] = next_state[2,0]
 
+            # particle's weight ... this will be modified each time a lm measurement occurs
+            weight = 1
+
             for lm_idx in range(num_landmarks):
                 bel_x = chi_bar_t[0,k]
                 bel_y = chi_bar_t[1,k]
                 bel_theta = chi_bar_t[2,k]
 
                 z_tr = z_true[lm_idx][t_step]
+
+                # make sure the landmark is in the field of view (bearing vs FOV)
+                if np.abs(wrap(z_tr[1,0])) > perception_bound:
+                    continue
 
                 if not seen_lm[lm_idx, k]:
                     seen_lm[lm_idx, k] = True
@@ -346,7 +358,7 @@ if __name__ == "__main__":
                     p_sig_i = 2*k
                     lm_uncertanties[lm_sig_i:lm_sig_i+2 , p_sig_i:p_sig_i+2] = sigma
                     # default importance weight
-                    chi_bar_t[-1,k] = p0
+                    weight *= p0
                 else:
                     # measurement prediction
                     lm_x_bar = lm_loc_estimates_x[lm_idx,k]
@@ -390,30 +402,30 @@ if __name__ == "__main__":
                     w_a = np.linalg.det(2 * np.pi * Q) ** -.5
                     w_b = mm( -.5*np.transpose(z_diff), mm( mat_inv(Q), z_diff) )
                     w_b = np.exp(w_b).item(0)
-                    weight = w_a * w_b
-                    chi_bar_t[-1,k] = weight
+                    weight *= w_a * w_b
 
-            # '''
-            # measurement model
-            '''
-            weight = 1
-            for m in range(len(lm_x)):
-                z_t = z_true[m][t_step]
-                weight *= measurement_model(z_t, measurement_std_devs, next_state, lm_x[m], lm_y[m])
             chi_bar_t[-1,k] = weight
-            '''
 
         # normalize weights
         chi_bar_t[-1,:] /= np.sum(chi_bar_t[-1,:])
 
         # resample, factoring in the weights
-        # lm_loc_estimates_x, lm_loc_estimates_y, lm_uncertanties
-        particle_poses[:,:,t_step] = low_variance_sampler(chi_bar_t)
-        # '''
+        new_particles = low_variance_sampler(chi_bar_t, lm_loc_estimates_x,
+            lm_loc_estimates_y, lm_uncertanties)
+        particle_poses[:,:,t_step] = new_particles[0]
+        lm_loc_estimates_x = new_particles[1]
+        lm_loc_estimates_y = new_particles[2]
+        lm_uncertanties = new_particles[3]
 
-        # TODO save average lm locations and uncertanties of all particles here
+        # save average lm uncertanty and location of all particles
+        avg_uncertainty = get_avg_uncertainty(lm_uncertanties)
+        for k in range(num_landmarks):
+            lm_uncertanty_history[k][:,:,t_step] = avg_uncertainty[k]
+            all_lm_loc_estimates_x[k,t_step] = np.mean(lm_loc_estimates_x[k,:])
+            all_lm_loc_estimates_y[k,t_step] = np.mean(lm_loc_estimates_y[k,:])
 
         loop.update(1)
     loop.close()
 
-    animate((x_pos_true, y_pos_true, theta_true), particle_poses, (lm_x, lm_y))
+    animate((x_pos_true, y_pos_true, theta_true), particle_poses, (lm_x, lm_y),
+        lm_uncertanty_history, (all_lm_loc_estimates_x, all_lm_loc_estimates_y), FOV)

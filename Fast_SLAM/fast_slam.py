@@ -171,11 +171,13 @@ if __name__ == "__main__":
     std_dev_bearing = .05
     # sensor field of view (in degrees)
     FOV = 360
+    # number of landmarks
+    num_landmarks = 10
     ########################################################################################
     ########################################################################################
 
     # uncertainty due to measurement noise
-    Q = np.array([
+    Q_t = np.array([
                     [(std_dev_range * std_dev_range), 0],
                     [0, (std_dev_bearing * std_dev_bearing)]
                 ])
@@ -192,7 +194,6 @@ if __name__ == "__main__":
     measurement_std_devs = (std_dev_range, std_dev_bearing)
 
     # landmarks (x and y coordinates)
-    num_landmarks = 5
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))
     lm_x = world_markers[0,:]
@@ -298,7 +299,7 @@ if __name__ == "__main__":
         # extra row for chi_bar_t is the weight of each particle
         chi_bar_t = np.zeros((particle_poses.shape[0]+1,particle_poses.shape[1]))
 
-        for i in range(num_particles):
+        for k in range(num_particles):
             # get inputs (add noise to represent spread in particles)
             u_vel = v_c[t_step] + \
                 randn(scale=np.sqrt( (alpha_1*(v_c[t_step]**2)) + (alpha_2*(om_c[t_step]**2)) ))
@@ -306,32 +307,33 @@ if __name__ == "__main__":
                 randn(scale=np.sqrt( (alpha_3*(v_c[t_step]**2)) + (alpha_4*(om_c[t_step]**2)) ))
             u_t = np.reshape([u_vel, u_om], (-1,1))
 
-            prev_state = np.reshape(particle_poses[:,i,t_step-1], (-1,1))
+            prev_state = np.reshape(particle_poses[:,k,t_step-1], (-1,1))
             
             # motion model
             next_state = sample_motion_model(u_t, prev_state, all_alphas, dt)
-            chi_bar_t[0,i] = next_state[0,0]
-            chi_bar_t[1,i] = next_state[1,0]
-            chi_bar_t[2,i] = next_state[2,0]
+            chi_bar_t[0,k] = next_state[0,0]
+            chi_bar_t[1,k] = next_state[1,0]
+            chi_bar_t[2,k] = next_state[2,0]
 
             for lm_idx in range(num_landmarks):
-                m_j_x = lm_x[lm_idx]
-                m_j_y = lm_y[lm_idx]
-                bel_x = chi_bar_t[0,i]
-                bel_y = chi_bar_t[1,i]
-                bel_theta = chi_bar_t[2,i]
+                bel_x = chi_bar_t[0,k]
+                bel_y = chi_bar_t[1,k]
+                bel_theta = chi_bar_t[2,k]
 
-                if not seen_lm[lm_idx, i]:
-                    seen_lm[lm_idx, i] = True
+                z_tr = z_true[lm_idx][t_step]
 
+                if not seen_lm[lm_idx, k]:
+                    seen_lm[lm_idx, k] = True
                     # initialize mean
-                    diff_x = m_j_x - bel_x
-                    diff_y = m_j_y - bel_y
-                    r = np.sqrt((diff_x ** 2) + (diff_y ** 2))
-                    bearing = arctan2(diff_y, diff_x) - bel_theta
-                    lm_loc_estimates_x[lm_idx,i] = bel_x + (r * cos(bearing + bel_theta))   # lm_x_bar
-                    lm_loc_estimates_y[lm_idx,i] = bel_y + (r * sin(bearing + bel_theta))   # lm_y_bar
+                    r = z_tr[0,0]
+                    bearing = z_tr[1,0]
+                    lm_x_bar = bel_x + (r * cos(bearing + bel_theta))
+                    lm_y_bar = bel_y + (r * sin(bearing + bel_theta))
+                    lm_loc_estimates_x[lm_idx,k] = lm_x_bar
+                    lm_loc_estimates_y[lm_idx,k] = lm_y_bar
                     # calculate jacobian
+                    diff_x = lm_x_bar - bel_x
+                    diff_y = lm_y_bar - bel_y
                     H = np.array([
                                     [r*diff_x, r*diff_y],
                                     [-diff_y, diff_x]
@@ -339,35 +341,77 @@ if __name__ == "__main__":
                     H *= 1 / (r*r)
                     # initialize covariance
                     H_inv = mat_inv(H)
-                    sigma = mm(H_inv, mm(Q, np.transpose(H_inv)))
+                    sigma = mm(H_inv, mm(Q_t, np.transpose(H_inv)))
                     lm_sig_i = 2*lm_idx
-                    p_sig_i = 2*i
+                    p_sig_i = 2*k
                     lm_uncertanties[lm_sig_i:lm_sig_i+2 , p_sig_i:p_sig_i+2] = sigma
                     # default importance weight
-                    chi_bar_t[-1,i] = p0
-
-                    # TODO save the measurement in a previous measurement data structure
-                    # (need it for the else block)
+                    chi_bar_t[-1,k] = p0
                 else:
-                    z_tr = z_true[lm_idx][t_step]
+                    # measurement prediction
+                    lm_x_bar = lm_loc_estimates_x[lm_idx,k]
+                    lm_y_bar = lm_loc_estimates_y[lm_idx,k]
+                    diff_x = lm_x_bar - bel_x
+                    diff_y = lm_y_bar - bel_y
+                    q = (diff_x * diff_x) + (diff_y * diff_y)
+                    r = np.sqrt(q)
+                    bearing = arctan2(diff_y,diff_x) - bel_theta
+                    z_hat = np.array([
+                                        [r],
+                                        [bearing]
+                                    ])
+                    # calculate jacobian
+                    diff_x = lm_x_bar - bel_x
+                    diff_y = lm_y_bar - bel_y
+                    H = np.array([
+                                    [r*diff_x, r*diff_y],
+                                    [-diff_y, diff_x]
+                                ])
+                    H *= 1 / (r*r)
+                    # measurement covariance
+                    lm_sig_i = 2*lm_idx
+                    p_sig_i = 2*k
+                    prev_sig = lm_uncertanties[lm_sig_i:lm_sig_i+2 , p_sig_i:p_sig_i+2]
+                    Q = mm(mm(H, prev_sig), np.transpose(H)) + Q_t
+                    # calculate kalman gain
+                    K = mm(prev_sig, mm(np.transpose(H), mat_inv(Q)))
+                    # update mean
+                    z_diff = z_tr - z_hat
+                    z_diff[1,0] = wrap(z_diff[1,0])
+                    mu_lm = np.array([lm_x_bar,lm_y_bar]).reshape(z_diff.shape) + \
+                        mm(K, z_diff)
+                    lm_loc_estimates_x[lm_idx,k] = mu_lm[0,0]
+                    lm_loc_estimates_y[lm_idx,k] = mu_lm[1,0]
+                    # update covariance
+                    temp = np.identity(K.shape[0]) - mm(K, H)
+                    sigma = mm(temp, prev_sig)
+                    lm_uncertanties[lm_sig_i:lm_sig_i+2 , p_sig_i:p_sig_i+2] = sigma
+                    # importance factor
+                    w_a = np.linalg.det(2 * np.pi * Q) ** -.5
+                    w_b = mm( -.5*np.transpose(z_diff), mm( mat_inv(Q), z_diff) )
+                    w_b = np.exp(w_b).item(0)
+                    weight = w_a * w_b
+                    chi_bar_t[-1,k] = weight
 
-                    # TODO save the z_hat in a previous measurement data structure
-                    pass
-
-            '''
+            # '''
             # measurement model
+            '''
             weight = 1
             for m in range(len(lm_x)):
                 z_t = z_true[m][t_step]
                 weight *= measurement_model(z_t, measurement_std_devs, next_state, lm_x[m], lm_y[m])
-            chi_bar_t[-1,i] = weight
+            chi_bar_t[-1,k] = weight
+            '''
 
         # normalize weights
         chi_bar_t[-1,:] /= np.sum(chi_bar_t[-1,:])
 
         # resample, factoring in the weights
+        # lm_loc_estimates_x, lm_loc_estimates_y, lm_uncertanties
         particle_poses[:,:,t_step] = low_variance_sampler(chi_bar_t)
-        '''
+        # '''
+
+        # TODO save average lm locations and uncertanties of all particles here
 
         loop.update(1)
     loop.close()

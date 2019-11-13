@@ -130,16 +130,7 @@ def wrap(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 if __name__ == "__main__":
-    '''
-    np.random.seed(1)
-    '''
     # landmarks (x and y coordinates)
-    '''
-    lm_x = [15, -5, 1, 10, 0, -7, 15]
-    lm_y = [15, -3, 7, -10, -9, 7, 5]
-    assert(len(lm_x) == len(lm_y))
-    num_landmarks = len(lm_x)
-    '''
     num_landmarks = 20
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))

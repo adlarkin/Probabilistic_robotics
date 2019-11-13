@@ -288,30 +288,24 @@ if __name__ == "__main__":
             z_true[k].append(z)
 
     # generate particles (initialize them to initial pose since we know it)
-    particle_poses = np.zeros((3,num_particles))
-    particle_poses[0,:] = x_pos_true[0]
-    particle_poses[1,:] = y_pos_true[0]
-    particle_poses[2,:] = theta_true[0]
+    particle_poses = np.zeros((3,num_particles,t.size))
+    particle_poses[0,:,0] = x_pos_true[0]
+    particle_poses[1,:,0] = y_pos_true[0]
+    particle_poses[2,:,0] = theta_true[0]
 
     # starting belief - initial condition (robot pose)
     mu_x = []
     mu_y = []
     mu_theta = []
-    save_belief(mu_x, mu_y, mu_theta, particle_poses)
+    save_belief(mu_x, mu_y, mu_theta, particle_poses[:,:,0])
 
     print("Running MCL...")
-    wait_time = .00001
-    p1 = plt.figure(1)
-    plt.plot(particle_poses[0,0], particle_poses[1,0], '.')
-    plot_robot( (x_pos_true[0],y_pos_true[0]) , theta_true[0] )
-    set_graph_bounds( particle_poses[0:2,:], (x_pos_true[0], y_pos_true[0]) )
-    plt.pause(wait_time)
     for t_step in range(1,t.size):
         print("at time %.1f (s)" % (t[t_step]))
         # next state/evolution of particles
         # extra row for chi_bar_t is the weight of each particle
         chi_bar_t = np.zeros((particle_poses.shape[0]+1,particle_poses.shape[1]))
-        chi_t = np.zeros(particle_poses.shape)
+        chi_t = np.zeros((particle_poses.shape[0], particle_poses.shape[1]))
 
         for i in range(num_particles):
             # get inputs (add noise to represent spread in particles)
@@ -321,10 +315,10 @@ if __name__ == "__main__":
                 randn(scale=np.sqrt( (alpha_3*(v_c[t_step]**2)) + (alpha_4*(om_c[t_step]**2)) ))
             u_t = np.reshape([u_vel, u_om], (-1,1))
 
-            state = np.reshape(particle_poses[:,i], (-1,1))
+            prev_state = np.reshape(particle_poses[:,i,t_step-1], (-1,1))
             
             # motion model
-            next_state = sample_motion_model(u_t, state, all_alphas, dt)
+            next_state = sample_motion_model(u_t, prev_state, all_alphas, dt)
             chi_bar_t[0,i] = next_state[0,0]
             chi_bar_t[1,i] = next_state[1,0]
             chi_bar_t[2,i] = next_state[2,0]
@@ -340,25 +334,6 @@ if __name__ == "__main__":
         chi_bar_t[-1,:] /= np.sum(chi_bar_t[-1,:])
 
         # resample, factoring in the weights
-        particle_poses = low_variance_sampler(chi_bar_t)
+        particle_poses[:,:,t_step] = low_variance_sampler(chi_bar_t)
 
-        save_belief(mu_x, mu_y, mu_theta, particle_poses)
-
-        plt.clf()
-        plt.plot(particle_poses[0,:], particle_poses[1,:], '.')
-        plot_robot( (x_pos_true[t_step],y_pos_true[t_step]) , theta_true[t_step] )
-        set_graph_bounds( particle_poses[0:2,:], (x_pos_true[t_step], y_pos_true[t_step]) )
-        plt.pause(wait_time)
-
-    # draw the real path that the robot took in comparison to the predicted path
-    plt.clf()
-    plt.plot(x_pos_true,y_pos_true, label="truth")
-    plt.plot(mu_x, mu_y, label="predicted")
-    plot_robot( (x_pos_true[-1],y_pos_true[-1]) , theta_true[-1] )
-    plt.plot(lm_x, lm_y, '+', color=black)
-    axes = plt.gca()
-    axes.set_xlim(world_bounds)
-    axes.set_ylim(world_bounds)
-    axes.set_aspect('equal')
-    plt.legend()
-    plt.show()
+        save_belief(mu_x, mu_y, mu_theta, particle_poses[:,:,t_step])

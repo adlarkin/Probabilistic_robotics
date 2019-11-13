@@ -9,6 +9,8 @@ from numpy.random import normal as randn
 from matplotlib import animation
 from scipy.stats import norm
 import random
+from matplotlib.patches import Ellipse, Wedge
+from tqdm import tqdm
 
 radius = .5
 black = 'k'
@@ -17,9 +19,12 @@ world_bounds = [-15,20]
 
 # can look at patch collection for a cleaner, more efficient solution
 # https://stackoverflow.com/questions/45969740/python-matplotlib-patchcollection-animation-doesnt-update
-def animate(true_states, belief_states, markers, uncertanties, fov):
+# def animate(true_states, belief_states, markers, uncertanties, fov):
+def animate(true_states, pose_particles, markers):
+    mu_x = [np.mean(pose_particles[0,:,i]) for i in range(pose_particles.shape[2])]
+    mu_y = [np.mean(pose_particles[1,:,i]) for i in range(pose_particles.shape[2])]
+    
     x_tr, y_tr, th_tr = true_states
-    fov_bound = np.deg2rad(fov)/2
     
     radius = .5
     yellow = (1,1,0)
@@ -32,51 +37,26 @@ def animate(true_states, belief_states, markers, uncertanties, fov):
     actual_path, = ax.plot([], [], color='b', zorder=-2, label="True Path")
     pred_path, = ax.plot([], [], color='r', zorder=-1, label="Predicted Path")
     heading, = ax.plot([], [], color=black)
+    particles, = ax.plot([], [], '.', color='c') # cyan
     robot = plt.Circle((x_tr[0],y_tr[0]), radius=radius, color=yellow, ec=black)
     ax.add_artist(robot)
-    lm_uncertanties = []
-    for i in range(len(markers[0])):
-        next_lm_unceratinty, = ax.plot([], [], color='g')
-        lm_uncertanties.append(next_lm_unceratinty)
-    vision_beam = Wedge((x_tr[0],y_tr[0]), 1000, np.rad2deg(th_tr[0] - fov_bound), 
-        np.rad2deg(th_tr[0] + fov_bound), zorder=-5, alpha=.1, color='m')
-    ax.add_artist(vision_beam)
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
     def init():
         actual_path.set_data([], [])
         pred_path.set_data([], [])
         heading.set_data([], [])
-        return (actual_path, pred_path, heading, robot, vision_beam) \
-            + tuple(lm_uncertanties)
+        particles.set_data([], [])
+        return actual_path, pred_path, heading, particles, robot
 
     def animate(i):
-        for j in range(len(lm_uncertanties)):
-            lm_idx = 3 + (2*j)
-            x_lm = belief_states[lm_idx,i]
-            y_lm = belief_states[lm_idx+1,i]
-            if (x_lm == 0) and (y_lm == 0):
-                # haven't seen landmark yet
-                continue
-            # http://anuncommonlab.com/articles/how-kalman-filters-work/part3.html#ellipses
-            U, S, _ = np.linalg.svd(uncertanties[lm_idx:lm_idx+2, lm_idx:lm_idx+2, i])
-            C = U * 2*np.sqrt(S)
-            theta = np.linspace(0, 2*np.pi, 100)
-            circle = np.array([cos(theta),sin(theta)])
-            e = mm(C, circle)
-            e[0,:] += x_lm
-            e[1,:] += y_lm
-            lm_uncertanties[j].set_data(e[0,:], e[1,:])
         actual_path.set_data(x_tr[:i+1], y_tr[:i+1])
-        pred_path.set_data(belief_states[0,:i+1], belief_states[1,:i+1])
+        pred_path.set_data(mu_x[:i+1], mu_y[:i+1])
         heading.set_data([x_tr[i], x_tr[i] + radius*cos(th_tr[i])], 
             [y_tr[i], y_tr[i] + radius*sin(th_tr[i])])
+        particles.set_data(pose_particles[0,:,i], pose_particles[1,:,i])
         robot.center = (x_tr[i],y_tr[i])
-        vision_beam.set_center((x_tr[i],y_tr[i]))
-        vision_beam.theta1 = np.rad2deg(th_tr[i] - fov_bound)
-        vision_beam.theta2 = np.rad2deg(th_tr[i] + fov_bound)
-        return (actual_path, pred_path, heading, robot, vision_beam) \
-            + tuple(lm_uncertanties)
+        return actual_path, pred_path, heading, particles, robot
 
     anim = animation.FuncAnimation(fig, animate, init_func=init,
         frames=len(x_tr), interval=40, blit=True, repeat=False)
@@ -161,45 +141,15 @@ def low_variance_sampler(chi):
 
     return new_particles
 
-def plot_robot(center, heading):
-    yellow = (1,1,0)
-
-    x = center[0]
-    y = center[1]
-
-    robot = plt.Circle((x,y), radius=radius, color=yellow, ec=black)
-    plt.plot([x, x + radius*cos(heading)], 
-            [y, y + radius*sin(heading)], color=black)
-    axes = plt.gca()
-    axes.add_patch(robot)
-
-def set_graph_bounds(particle_positions, true_position, equal_aspect=True):
-    x = true_position[0]
-    y = true_position[1]
-
-    padding = .1
-    max_x_particle = np.max(particle_positions[0,:]) + padding
-    min_x_particle = np.min(particle_positions[0,:]) - padding
-    max_y_particle = np.max(particle_positions[1,:]) + padding
-    min_y_particle = np.min(particle_positions[1,:]) - padding
-
-    padding = 1.5 * radius
-    max_x_graph = max(max_x_particle, x + padding)
-    min_x_graph = min(min_x_particle, x - padding)
-    max_y_graph = max(max_y_particle, y + padding)
-    min_y_graph = min(min_y_particle, y - padding)
-
-    axes = plt.gca()
-    axes.set_xlim([min_x_graph,max_x_graph])
-    axes.set_ylim([min_y_graph,max_y_graph])
-
-    if equal_aspect:
-        axes.set_aspect('equal')
-
-def save_belief(bel_x, bel_y, bel_theta, mcl_particles):
-    bel_x.append( np.mean(mcl_particles[0,:]) )
-    bel_y.append( np.mean(mcl_particles[1,:]) )
-    bel_theta.append( np.mean(mcl_particles[2,:]) )
+def get_avg_uncertainty(lm_uncertainty_matrix):
+    avgs = []
+    for lm in range(0,lm_uncertainty_matrix.shape[0],2):
+        total = np.zeros((2,2))
+        for p in range(0,lm_uncertainty_matrix.shape[1],2):
+            total += lm_uncertainty_matrix[lm:lm+2 , p:p+2]
+        total /= lm_uncertainty_matrix.shape[1]/2
+        avgs.append(total)
+    return avgs
 
 if __name__ == "__main__":
     dt = .1
@@ -293,15 +243,37 @@ if __name__ == "__main__":
     particle_poses[1,:,0] = y_pos_true[0]
     particle_poses[2,:,0] = theta_true[0]
 
-    # starting belief - initial condition (robot pose)
-    mu_x = []
-    mu_y = []
-    mu_theta = []
-    save_belief(mu_x, mu_y, mu_theta, particle_poses[:,:,0])
+    # uncertanties for every landmark at a given time
+    # start off with high landmark uncertainty
+    # (row idx is the landmark idx. column idx is the particle idx)
+    initial_uncertainty = 5000
+    lm_uncertanties = np.zeros((2*num_landmarks,2*num_particles))
+    for lm_idx in range(0,lm_uncertanties.shape[0],2):
+        for p_idx in range(0,lm_uncertanties.shape[1],2):
+            lm_uncertanties[lm_idx,p_idx] = initial_uncertainty
+            lm_uncertanties[lm_idx+1,p_idx+1] = initial_uncertainty
 
-    print("Running MCL...")
+    # uncertanties for every landmark over all times
+    # (the average of all particle uncertanties for a landmark at a given time)
+    init_avgs = get_avg_uncertainty(lm_uncertanties)
+    lm_uncertanty_history = {}
+    for k in range(num_landmarks):
+        lm_uncertanty_history[k] = np.zeros((2,2,t.size))
+        lm_uncertanty_history[k][:,:,0] = init_avgs[k]
+
+    # landmark location estimates (current time)
+    lm_loc_estimates_x = np.zeros((num_landmarks, num_particles))
+    lm_loc_estimates_y = np.zeros((num_landmarks, num_particles))
+
+    # landmark locations over all times (avg of all particle location estimates)
+    all_lm_loc_estimates_x = np.zeros((num_landmarks, t.size))
+    all_lm_loc_estimates_y = np.zeros((num_landmarks, t.size))
+
+    # seen landmarks for each particle
+    seen_lm = np.zeros((num_landmarks, num_particles), dtype=bool)
+
+    loop = tqdm(total=t.size, position=0)
     for t_step in range(1,t.size):
-        print("at time %.1f (s)" % (t[t_step]))
         # next state/evolution of particles
         # extra row for chi_bar_t is the weight of each particle
         chi_bar_t = np.zeros((particle_poses.shape[0]+1,particle_poses.shape[1]))
@@ -336,4 +308,7 @@ if __name__ == "__main__":
         # resample, factoring in the weights
         particle_poses[:,:,t_step] = low_variance_sampler(chi_bar_t)
 
-        save_belief(mu_x, mu_y, mu_theta, particle_poses[:,:,t_step])
+        loop.update(1)
+    loop.close()
+
+    animate((x_pos_true, y_pos_true, theta_true), particle_poses, (lm_x, lm_y))

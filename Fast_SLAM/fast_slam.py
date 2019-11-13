@@ -169,11 +169,22 @@ if __name__ == "__main__":
     # std deviation of range and bearing sensor noise for each landmark
     std_dev_range = .1
     std_dev_bearing = .05
+    # sensor field of view (in degrees)
+    FOV = 360
     ########################################################################################
     ########################################################################################
 
+    # uncertainty due to measurement noise
+    Q = np.array([
+                    [(std_dev_range * std_dev_range), 0],
+                    [0, (std_dev_bearing * std_dev_bearing)]
+                ])
+
     # particles for MCL
     num_particles = int(input("Number of particles: "))
+
+    # default importance weight
+    p0 = 1 / num_particles
 
     # (put None as first parameter so that indexing matches alpha name)
     all_alphas = (None, alpha_1, alpha_2, alpha_3, alpha_4, alpha_5, alpha_6)
@@ -244,14 +255,20 @@ if __name__ == "__main__":
     particle_poses[2,:,0] = theta_true[0]
 
     # uncertanties for every landmark at a given time
+    '''
     # start off with high landmark uncertainty
+    '''
     # (row idx is the landmark idx. column idx is the particle idx)
+    '''
     initial_uncertainty = 5000
+    '''
     lm_uncertanties = np.zeros((2*num_landmarks,2*num_particles))
+    '''
     for lm_idx in range(0,lm_uncertanties.shape[0],2):
         for p_idx in range(0,lm_uncertanties.shape[1],2):
             lm_uncertanties[lm_idx,p_idx] = initial_uncertainty
             lm_uncertanties[lm_idx+1,p_idx+1] = initial_uncertainty
+    '''
 
     # uncertanties for every landmark over all times
     # (the average of all particle uncertanties for a landmark at a given time)
@@ -259,7 +276,10 @@ if __name__ == "__main__":
     lm_uncertanty_history = {}
     for k in range(num_landmarks):
         lm_uncertanty_history[k] = np.zeros((2,2,t.size))
+        '''
+        # save the initial uncertanty in the history
         lm_uncertanty_history[k][:,:,0] = init_avgs[k]
+        '''
 
     # landmark location estimates (current time)
     lm_loc_estimates_x = np.zeros((num_landmarks, num_particles))
@@ -277,7 +297,6 @@ if __name__ == "__main__":
         # next state/evolution of particles
         # extra row for chi_bar_t is the weight of each particle
         chi_bar_t = np.zeros((particle_poses.shape[0]+1,particle_poses.shape[1]))
-        chi_t = np.zeros((particle_poses.shape[0], particle_poses.shape[1]))
 
         for i in range(num_particles):
             # get inputs (add noise to represent spread in particles)
@@ -295,6 +314,47 @@ if __name__ == "__main__":
             chi_bar_t[1,i] = next_state[1,0]
             chi_bar_t[2,i] = next_state[2,0]
 
+            for lm_idx in range(num_landmarks):
+                m_j_x = lm_x[lm_idx]
+                m_j_y = lm_y[lm_idx]
+                bel_x = chi_bar_t[0,i]
+                bel_y = chi_bar_t[1,i]
+                bel_theta = chi_bar_t[2,i]
+
+                if not seen_lm[lm_idx, i]:
+                    seen_lm[lm_idx, i] = True
+
+                    # initialize mean
+                    diff_x = m_j_x - bel_x
+                    diff_y = m_j_y - bel_y
+                    r = np.sqrt((diff_x ** 2) + (diff_y ** 2))
+                    bearing = arctan2(diff_y, diff_x) - bel_theta
+                    lm_loc_estimates_x[lm_idx,i] = bel_x + (r * cos(bearing + bel_theta))   # lm_x_bar
+                    lm_loc_estimates_y[lm_idx,i] = bel_y + (r * sin(bearing + bel_theta))   # lm_y_bar
+                    # calculate jacobian
+                    H = np.array([
+                                    [r*diff_x, r*diff_y],
+                                    [-diff_y, diff_x]
+                                ])
+                    H *= 1 / (r*r)
+                    # initialize covariance
+                    H_inv = mat_inv(H)
+                    sigma = mm(H_inv, mm(Q, np.transpose(H_inv)))
+                    lm_sig_i = 2*lm_idx
+                    p_sig_i = 2*i
+                    lm_uncertanties[lm_sig_i:lm_sig_i+2 , p_sig_i:p_sig_i+2] = sigma
+                    # default importance weight
+                    chi_bar_t[-1,i] = p0
+
+                    # TODO save the measurement in a previous measurement data structure
+                    # (need it for the else block)
+                else:
+                    z_tr = z_true[lm_idx][t_step]
+
+                    # TODO save the z_hat in a previous measurement data structure
+                    pass
+
+            '''
             # measurement model
             weight = 1
             for m in range(len(lm_x)):
@@ -307,6 +367,7 @@ if __name__ == "__main__":
 
         # resample, factoring in the weights
         particle_poses[:,:,t_step] = low_variance_sampler(chi_bar_t)
+        '''
 
         loop.update(1)
     loop.close()

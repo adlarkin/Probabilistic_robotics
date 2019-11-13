@@ -135,7 +135,7 @@ if __name__ == "__main__":
     world_markers = np.random.randint(low=world_bounds[0]+1, 
         high=world_bounds[1], size=(2,num_landmarks))
     lm_x = world_markers[0,:]
-    lm_y = world_markers[1,:]
+    lm_y = world_markers[1,:] 
 
     seen_landmark = {}
     for i in range(num_landmarks):
@@ -191,8 +191,6 @@ if __name__ == "__main__":
     x_pos_true = np.zeros(t.shape)
     y_pos_true = np.zeros(t.shape)
     theta_true = np.zeros(t.shape)  # radians
-
-    # predictions
 
     # control inputs (truth ... with noise)
     velocity = v_c + randn(scale=np.sqrt( (alpha_1*(v_c**2)) + (alpha_2*(om_c**2)) ))
@@ -279,11 +277,8 @@ if __name__ == "__main__":
             lm_idx = 3 + (2*j) # where we index the mu vector for the j'th landmark
 
             if not seen_landmark[j]:
-                diff_x = m_j_x - bel_x
-                diff_y = m_j_y - bel_y
-                r = np.sqrt((diff_x ** 2) + (diff_y ** 2))
-                bearing = arctan2(diff_y, diff_x) - bel_theta
-                
+                r = z_true[0,0]
+                bearing = z_true[1,0]
                 mu_bar[lm_idx, 0] = bel_x + (r * cos(bearing + bel_theta))     # lm_x_bar
                 mu_bar[lm_idx + 1, 0] = bel_y + (r * sin(bearing + bel_theta)) # lm_y_bar
                 

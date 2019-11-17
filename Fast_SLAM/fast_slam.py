@@ -50,7 +50,7 @@ def animate(true_states, pose_particles, markers, lm_pred_uncertainty,
         next_lm_unceratinty, = ax.plot([], [], color='r')
         lm_uncertanties.append(next_lm_unceratinty)
     vision_beam = Wedge((x_tr[0],y_tr[0]), 1000, np.rad2deg(th_tr[0] - fov_bound), 
-        np.rad2deg(th_tr[0] + fov_bound), zorder=-5, alpha=.1, color='m')
+        np.rad2deg(th_tr[0] + fov_bound), zorder=-5, alpha=.15, color='m')
     ax.add_artist(vision_beam)
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
@@ -186,13 +186,13 @@ if __name__ == "__main__":
     alpha_2 = .01
     alpha_3 = .01
     alpha_4 = .1
-    alpha_5 = .01
-    alpha_6 = .01
+    alpha_5 = .001
+    alpha_6 = .001
     # std deviation of range and bearing sensor noise for each landmark
     std_dev_range = .1
     std_dev_bearing = .05
     # sensor field of view (in degrees)
-    FOV = 90
+    FOV = 120
     # number of landmarks
     num_landmarks = 10
     ########################################################################################
@@ -220,8 +220,8 @@ if __name__ == "__main__":
     lm_y = world_markers[1,:]
 
     # control inputs - noise free (NOT ground truth)
-    v_c = 1 + (.5*cos(2*np.pi*.2*t))
-    om_c = -.2 + (2*cos(2*np.pi*.6*t))
+    v_c = 1 + (.1*sin(2*np.pi*.3*t))
+    om_c = -.2 + (.1*cos(2*np.pi*.2*t))
     # om_c = -.2 + (1*cos(2*np.pi*.2*t))
 
     # ground truth inputs (with noise)

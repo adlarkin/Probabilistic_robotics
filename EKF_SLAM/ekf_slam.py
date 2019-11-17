@@ -184,7 +184,7 @@ if __name__ == "__main__":
     F_x[0:3,0:3] = np.identity(3)
 
     # noise free inputs (NOT ground truth)
-    v_c = 1 + (.5*cos(2*np.pi*.2*t))
+    v_c = 1 + (.5*sin(2*np.pi*.2*t))
     om_c = -.2 + (2*cos(2*np.pi*.6*t))
 
     # ground truth

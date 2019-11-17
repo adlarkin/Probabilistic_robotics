@@ -108,7 +108,7 @@ if __name__ == "__main__":
     ########################################################################################
     ############################## DEFINE PARAMETERS HERE ##################################
     ########################################################################################
-    use_mat_data = False
+    use_mat_data = True
     # noise in the command velocities (translational and rotational)
     alpha_1 = .1
     alpha_2 = .01
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     num_landmarks = len(lm_x)
 
     # noise free inputs (NOT ground truth)
-    v_c = 1 + (.5*cos(2*np.pi*.2*t))
+    v_c = 1 + (.5*sin(2*np.pi*.2*t))
     om_c = -.2 + (2*cos(2*np.pi*.6*t))
 
     # ground truth

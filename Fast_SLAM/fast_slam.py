@@ -174,7 +174,7 @@ def get_avg_uncertainty(lm_uncertainty_matrix):
 
 if __name__ == "__main__":
     dt = .1
-    total_time = 75 # seconds
+    total_time = 70 # seconds
     t = np.arange(0, total_time+dt, dt)
 
     ########################################################################################
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     std_dev_range = .1
     std_dev_bearing = .05
     # sensor field of view (in degrees)
-    FOV = 120
+    FOV = 90
     # number of landmarks
     num_landmarks = 10
     ########################################################################################

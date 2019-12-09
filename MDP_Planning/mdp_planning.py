@@ -37,7 +37,7 @@ def try_action(start, all_next_pos, vals, obs, m):
 
 
 if __name__ == "__main__":
-    discount_factor = 1
+    discount_factor = .995
     m_cost = -2 # cost associated with moving
     print("discount factor:",discount_factor,"R:",m_cost)
 

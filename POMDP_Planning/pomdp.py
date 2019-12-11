@@ -73,7 +73,11 @@ if __name__ == "__main__":
 
     # plot my results
     for line in range(Y.shape[0]):
-        plt.plot([0,1], [Y[line,2],Y[line,1]], color='k', alpha=0.5)
+        # only plotting solutions that have reward bounds above 25
+        # (this is a hardcoded solution for pruning when T=2)
+        if Y[line,1] < 25 and Y[line,2] < 25:
+            continue
+        plt.plot([0,1], [Y[line,2],Y[line,1]], color='k', alpha=0.6)
     # show true solution
     if T == 2:
         plt.plot([0,1],[100,-100],'--r')
